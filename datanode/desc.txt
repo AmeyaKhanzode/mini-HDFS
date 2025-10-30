@@ -1,0 +1,2 @@
+- Thread 1: sends heartbeats
+- Thread 2: listen for chunk upload/download requests

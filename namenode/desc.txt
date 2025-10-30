@@ -1,0 +1,2 @@
+- Thread 1: receives heartbeats 
+- Thread 2: listens for client requests
