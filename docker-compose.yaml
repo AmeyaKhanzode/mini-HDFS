@@ -1,0 +1,59 @@
+version: "3.9"
+
+services:
+  namenode:
+    build:
+      context: .
+      dockerfile: namenode/Dockerfile
+    container_name: namenode
+    environment:
+      - NAMENODE_HOST=namenode
+      - NAMENODE_PORT=5000
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./namenode:/app/namenode
+    networks:
+      - dfsnet
+
+  datanode1:
+    build:
+      context: .
+      dockerfile: datanode/Dockerfile
+    container_name: datanode1
+    environment:
+      - DATANODE_ID=1
+      - DATANODE_HOST=datanode1
+      - DATANODE_PORT=5001
+      - NAMENODE_HOST=namenode         # So it knows where to send heartbeats
+      - NAMENODE_PORT=5000
+    volumes:
+      - ./datanode:/app/datanode
+      - ./datanode/storage1:/app/datanode/storage
+    ports:
+    - "5001:5001"
+    networks:
+    - dfsnet
+
+  datanode2:
+    build:
+      context: .
+      dockerfile: datanode/Dockerfile
+    container_name: datanode2
+    environment:
+      - DATANODE_ID=2
+      - DATANODE_HOST=datanode2
+      - DATANODE_PORT=5002
+      - NAMENODE_HOST=namenode
+      - NAMENODE_PORT=5000
+    volumes:
+      - ./datanode:/app/datanode
+      - ./datanode/storage2:/app/datanode/storage
+    ports:
+    - "5002:5002"
+    networks:
+    - dfsnet
+
+networks:
+  dfsnet:
+    driver: bridge
