@@ -3,6 +3,15 @@ import os
 NAMENODE_HOST = os.getenv("NAMENODE_HOST", "namenode")
 NAMENODE_PORT = int(os.getenv("NAMENODE_PORT", 5000))
 
+'''
+when shifting to real machines, make sure to change the env variables by running:
+
+export NAMENODE_HOST=192.168.0.101
+export DATANODE1_HOST=192.168.0.102
+export DATANODE2_HOST=192.168.0.103
+
+'''
+
 DATANODES = [
     {
         "id": "datanode1",
