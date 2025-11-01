@@ -17,6 +17,7 @@ def assign_datanodes(num_chunks):
     '''
     {
         chunk_1: [datanode1:5001, datanode2:5002]
+        chunk_2: [datanode2:5002, datanode1:5001]
     }
     '''
     alive_datanodes = get_alive_datanodes()
@@ -56,7 +57,7 @@ def handle_client(client_sock, addr):
                     return
 
                 chunk_placements = assign_datanodes(num_chunks)
-                client_sock.send(json.dumps(chunk_placements).encode())
+                client_sock.sendall((json.dumps(chunk_placements) + "\n").encode())
     except Exception as e:
             logger.error(f"Error handling client {addr}: {e}")
     finally:

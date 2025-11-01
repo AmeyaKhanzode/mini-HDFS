@@ -1,1 +1,4 @@
 *.pdf
+.vscode
+.DS_STORE
+*pycache*

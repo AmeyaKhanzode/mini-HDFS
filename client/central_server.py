@@ -1,4 +1,6 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
+import logging
+import math
 from fastapi.responses import JSONResponse
 import json
 from socket import *
@@ -6,6 +8,7 @@ from pydantic import BaseModel
 from shared.config import NAMENODE_HOST, NAMENODE_PORT, DATANODES
 import hashlib
 from typing import List, Dict
+import asyncio
 
 app = FastAPI()
 CHUNK_SIZE = 2 * 1024 * 1024
@@ -18,28 +21,26 @@ class UploadResponse(BaseModel):
     message: str
 
 
-def request_chunk_write(filename, num_chunks):
-    namenode_port = NAMENODE_PORT
-    namenode_host = NAMENODE_HOST
-
+async def request_chunk_write(filename, num_chunks):
     try:
-        sock = socket(AF_INET, SOCK_STREAM)
-        sock.connect((namenode_host, namenode_port))
-        
+        reader, writer = await asyncio.open_connection(NAMENODE_HOST, NAMENODE_PORT)
+
         req = {
             "type": "write_req",
             "filename": filename,
             "num_chunks": num_chunks
         }
 
-        sock.send(json.dumps(req).encode())
-        data = sock.recv(4096)
-        chunk_placements = json.loads(data.decode())
-        sock.close()
-        return chunk_placements
-    
+        writer.write((json.dumps(req) + "\n").encode())
+        await writer.drain()
+
+        data = await reader.readline()
+        writer.close()
+        await writer.wait_closed()
+
+        return json.loads(data.decode().strip())
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error contacting namenode: {str(e)}")
+        print(f"Some shit went wrong {e}")
 
 
 def send_chunk_to_datanode(chunk_data: bytes, datanode_info: Dict, chunk_id: int, filename: str, max_retries: int = 3):
@@ -74,25 +75,29 @@ def send_chunk_to_datanode(chunk_data: bytes, datanode_info: Dict, chunk_id: int
     return False
 
 
-@app.post("/upload", response_model=UploadResponse)
-async def upload_file(file: UploadFile = File(...)):
+# TODO await asyncio.gather(*upload_tasks), wanna implement this later
+
+@app.post("/upload")
+async def upload_file(
+    file: UploadFile = File(...),
+    file_size: int = Form(...)
+):
+    chunk_count = math.ceil(file_size / CHUNK_SIZE)
+    chunk_placements = await request_chunk_write(file.filename, chunk_count)
+
     if not file:
         raise HTTPException(status_code=400, detail="No file provided")
 
-    total_size = 0
-    chunk_count = 0
-    file_hash = hashlib.md5()
+    file_hash = hashlib.sha256()
     
     try:
+        chunk_index = 0
         while True:
             chunk_data = await file.read(CHUNK_SIZE)
             if not chunk_data:
                 break
             
-            total_size += len(chunk_data)
             file_hash.update(chunk_data)
-            
-            chunk_placements = request_chunk_write(file.filename, chunk_count + 1)
             
             if not chunk_placements:
                 raise HTTPException(
@@ -100,55 +105,36 @@ async def upload_file(file: UploadFile = File(...)):
                     detail="Failed to get chunk placement from namenode"
                 )
             
-            if str(chunk_count) not in chunk_placements:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"No placement info for chunk {chunk_count}"
-                )
-            
-            assigned_datanodes = chunk_placements[str(chunk_count)]
-            stored_successfully = False
+            chunk_index += 1
+            chunk_id = f"chunk_{chunk_index}"
 
-            for datanode_id in assigned_datanodes:
-                datanode_info = next(
-                    (dn for dn in DATANODES if dn['id'] == datanode_id), 
-                    None
-                )
-                
-                if not datanode_info:
+            if chunk_id not in chunk_placements:
+                raise HTTPException(status_code=500, detail=f"No placement info for {chunk_id}")
+
+            nodes = chunk_placements[chunk_id]
+
+            for i in nodes:
+                host, port = i.split(":")
+
+                datanode_info = {
+                    "host": host,
+                    "port": int(port),
+                }
+
+                if send_chunk_to_datanode(chunk_data, datanode_info, chunk_id, file.filename):
                     continue
-                
-                success = send_chunk_to_datanode(
-                    chunk_data, 
-                    datanode_info, 
-                    chunk_count, 
-                    file.filename
-                )
-                
-                if success:
-                    stored_successfully = True
-            
-            if not stored_successfully:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"Failed to store chunk {chunk_count} on any datanode"
-                )
-            
-            chunk_count += 1
-        
-        if chunk_count == 0:
-            raise HTTPException(status_code=400, detail="Empty file")
+                else:
+                    print("lalith put raise here")
         
         final_hash = file_hash.hexdigest()
         
-        return UploadResponse(
-            filename=file.filename,
-            file_size=total_size,
-            chunks_processed=chunk_count,
-            file_hash=final_hash,
-            message=f"File uploaded successfully in {chunk_count} chunks"
-        )
-    
+        return {
+            "filename": file.filename,
+            "num_chunks": chunk_count,
+            "file_hash": final_hash,
+            "message": f"File uploaded successfully"
+        }
+
     except HTTPException:
         raise
     
@@ -182,8 +168,3 @@ async def get_config():
         "datanodes": DATANODES,
         "chunk_size_mb": CHUNK_SIZE / (1024 * 1024)
     }
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
