@@ -11,4 +11,4 @@ ENV PYTHONPATH="/app"
 WORKDIR /app/datanode
 
 # Run the datanode socket handler
-CMD ["python", "socket_handler.py"]
+CMD ["python", "server.py"]
