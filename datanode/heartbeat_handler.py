@@ -4,7 +4,7 @@ import os
 import logging
 import time
 from socket import *
-from shared.config import HEARTBEAT_INTERVAL, CONNECTION_RETRY_DELAY
+from shared.config import DATANODES, HEARTBEAT_INTERVAL, CONNECTION_RETRY_DELAY, NAMENODE_HOST, NAMENODE_PORT
 
 logging.basicConfig(
     level=logging.INFO,
@@ -13,8 +13,6 @@ logging.basicConfig(
 
 def send_heartbeat():
     logger = logging.getLogger(__name__)
-    namenode_host = os.getenv("NAMENODE_HOST")
-    namenode_port = int(os.getenv("NAMENODE_PORT"))
     datanode_id = os.getenv("DATANODE_ID")
     
     while True:
@@ -24,11 +22,13 @@ def send_heartbeat():
         while retry_count < max_retries:
             try:
                 sock = socket(AF_INET, SOCK_STREAM)
-                sock.connect((namenode_host, namenode_port))
+                sock.connect((NAMENODE_HOST, NAMENODE_PORT))
                 heartbeat = {
                     "type": "heartbeat",
                     "status": "alive",
                     "node_id": datanode_id,
+                    "datanode_host": DATANODES[datanode_id].get("host"),
+                    "datanode_port": DATANODES[datanode_id].get("port"),
                     "status_code": 1
                 }
                 sock.send(json.dumps(heartbeat).encode())

@@ -3,6 +3,7 @@ import time
 import logging
 import threading
 from shared.config import MONITOR_INTERVAL
+from main import req_listener
 
 logging.basicConfig(
     level=logging.INFO,
@@ -13,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 logger.info("Starting namenode server...")
 
+# to listen for heartbeats
 heartbeat_thread = threading.Thread(target=heartbeat_handler.handle_heartbeats, daemon=True)
 heartbeat_thread.start()
 
@@ -24,8 +26,13 @@ def monitor_down_nodes():
                 logger.warning(f"{node} is down")
         time.sleep(MONITOR_INTERVAL)
 
+# to detect nodes that are down
 monitor_thread = threading.Thread(target=monitor_down_nodes, daemon=True)
 monitor_thread.start()
+
+# to listen for request
+req_thread = threading.Thread(target=req_listener, daemon=True)
+req_thread.start()
 
 while True:
     time.sleep(60)
