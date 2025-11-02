@@ -4,7 +4,7 @@ import os
 import logging
 import time
 from socket import *
-from shared.config import DATANODES, HEARTBEAT_INTERVAL, CONNECTION_RETRY_DELAY, NAMENODE_HOST, NAMENODE_PORT
+from shared.config import HEARTBEAT_INTERVAL, CONNECTION_RETRY_DELAY, NAMENODE_HOST, NAMENODE_PORT, DATANODE_HOST, DATANODE_PORT
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,8 +27,8 @@ def send_heartbeat():
                     "type": "heartbeat",
                     "status": "alive",
                     "node_id": datanode_id,
-                    "datanode_host": DATANODES[datanode_id].get("host"),
-                    "datanode_port": DATANODES[datanode_id].get("port"),
+                    "datanode_host": DATANODE_HOST,
+                    "datanode_port": DATANODE_PORT,
                     "status_code": 1
                 }
                 sock.send(json.dumps(heartbeat).encode())

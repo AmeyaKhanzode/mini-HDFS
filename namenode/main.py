@@ -1,4 +1,5 @@
 # For each chunk, requests placement info from Namenode.
+import uuid
 import threading
 import random
 from socket import *
@@ -9,6 +10,12 @@ from shared.commons import create_socket
 from shared.config import BACKEND_HOST, BACKEND_PORT, NAMENODE_PORT, REPLICATION_FACTOR
 from heartbeat_handler import get_alive_datanodes
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 REQ_PORT = 5050
 
 def assign_datanodes(num_chunks):
@@ -16,31 +23,44 @@ def assign_datanodes(num_chunks):
     # returns a dict of where to store {chunk1: [], chunk2: []}
     '''
     {
-        chunk_1: [datanode1:5001, datanode2:5002]
-        chunk_2: [datanode2:5002, datanode1:5001]
+        "file_id": "b10a2f8a-97a5-4d30-becb-2a76d...",
+        "placements": {
+            "chunk_1": ["datanode1:5001", "datanode2:5002"],
+            "chunk_2": ["datanode2:5002", "datanode1:5001"]
+        }
     }
+
     '''
     alive_datanodes = get_alive_datanodes()
 
-    if REPLICATION_FACTOR > len(alive_datanodes):
-        print("cant store rn")
 
-    chunk_placements = {}
+    if REPLICATION_FACTOR > len(alive_datanodes):
+        logger.warning(f"Not enough datanodes: need {REPLICATION_FACTOR}, got {len(alive_datanodes)}")
+        return {
+            "error": "not enough datanodes"
+        }
+
+    placements = {}
+
+    file_id = str(uuid.uuid4())
+    
     random.shuffle(alive_datanodes)
 
     for i in range(num_chunks):
         selected_nodes = random.sample(alive_datanodes, REPLICATION_FACTOR)
 
         chunk_id = f"chunk_{i + 1}"
-        chunk_placements[chunk_id] = [f"{node['host']}:{node['port']}" for node in selected_nodes]
+        placements[chunk_id] = [f"{node['host']}:{node['port']}" for node in selected_nodes]
         
-        random.shuffle(alive_datanodes)
-    return chunk_placements
+    return {
+        "file_id": file_id,
+        "placements": placements
+    }
 
 def handle_client(client_sock, addr):
     logger = logging.getLogger(__name__)
     try:
-        data = client_sock.recv(1024)
+        data = client_sock.recv(4096)
         if not data:
             return
 
@@ -52,9 +72,6 @@ def handle_client(client_sock, addr):
                 num_chunks = req_data.get("num_chunks")
 
                 alive_datanodes = get_alive_datanodes()
-                if REPLICATION_FACTOR > len(alive_datanodes):
-                    client_sock.send(b'{"error": "Not enough datanodes"}')
-                    return
 
                 chunk_placements = assign_datanodes(num_chunks)
                 client_sock.sendall((json.dumps(chunk_placements) + "\n").encode())

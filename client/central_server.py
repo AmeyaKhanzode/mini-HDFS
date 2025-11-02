@@ -5,19 +5,24 @@ from fastapi.responses import JSONResponse
 import json
 from socket import *
 from pydantic import BaseModel
-from shared.config import NAMENODE_HOST, NAMENODE_PORT, DATANODES
+from shared.config import NAMENODE_HOST, NAMENODE_PORT, DATANODES, CHUNK_SIZE
 import hashlib
 from typing import List, Dict
 import asyncio
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 app = FastAPI()
-CHUNK_SIZE = 2 * 1024 * 1024
 
 class UploadResponse(BaseModel):
     filename: str
     file_size: int
-    chunks_processed: int
-    file_hash: str
+    num_chunks: int
+    file_id: str
     message: str
 
 
@@ -40,10 +45,14 @@ async def request_chunk_write(filename, num_chunks):
 
         return json.loads(data.decode().strip())
     except Exception as e:
-        print(f"Some shit went wrong {e}")
+        logger.error(f"Failed to get chunk placements from namenode: {e}")
+        return None
 
 
-def send_chunk_to_datanode(chunk_data: bytes, datanode_info: Dict, chunk_id: int, filename: str, max_retries: int = 3):
+# TODO check for ACK only then send
+
+
+def send_chunk_to_datanode(chunk_data, datanode_info, chunk_index, file_id, chunk_hash, max_retries=3):
     for attempt in range(max_retries):
         sock = None
         try:
@@ -52,22 +61,28 @@ def send_chunk_to_datanode(chunk_data: bytes, datanode_info: Dict, chunk_id: int
             
             metadata = {
                 "type": "write_chunk",
-                "filename": filename,
-                "chunk_id": chunk_id,
-                "chunk_size": len(chunk_data)
+                "file_id": file_id,
+                "chunk_index": chunk_index,
+                "chunk_hash": chunk_hash
             }
             
             sock.send(json.dumps(metadata).encode())
-            sock.recv(1024)
+
+            # to get an ACK
+            ack = sock.recv(4096)
+            if not ack:
+                raise Exception("No ACK from datanode")
+
+            #send data only after an ACK
             sock.sendall(chunk_data)
             response = sock.recv(1024)
             sock.close()
-            
             return True
         
         except Exception as e:
             if sock:
                 sock.close()
+                logger.warning(f"Retry {attempt+1}/{max_retries} for chunk {chunk_index} to {datanode_info['host']}:{datanode_info['port']} ({e})")
             if attempt == max_retries - 1:
                 return False
             continue
@@ -82,14 +97,19 @@ async def upload_file(
     file: UploadFile = File(...),
     file_size: int = Form(...)
 ):
-    chunk_count = math.ceil(file_size / CHUNK_SIZE)
-    chunk_placements = await request_chunk_write(file.filename, chunk_count)
 
     if not file:
         raise HTTPException(status_code=400, detail="No file provided")
 
-    file_hash = hashlib.sha256()
+    chunk_count = math.ceil(file_size / CHUNK_SIZE)
     
+    placement_response = await request_chunk_write(file.filename, chunk_count)
+    if not placement_response or "placements" not in placement_response:
+            raise HTTPException(status_code=500, detail="Failed to get chunk placements from Namenode")
+
+    file_id = placement_response["file_id"]
+    chunk_placements = placement_response["placements"]
+
     try:
         chunk_index = 0
         while True:
@@ -97,47 +117,36 @@ async def upload_file(
             if not chunk_data:
                 break
             
-            file_hash.update(chunk_data)
-            
-            if not chunk_placements:
-                raise HTTPException(
-                    status_code=500, 
-                    detail="Failed to get chunk placement from namenode"
-                )
-            
+
             chunk_index += 1
             chunk_id = f"chunk_{chunk_index}"
+            chunk_hash = hashlib.sha256(chunk_data).hexdigest()
 
             if chunk_id not in chunk_placements:
                 raise HTTPException(status_code=500, detail=f"No placement info for {chunk_id}")
 
-            nodes = chunk_placements[chunk_id]
+            datanodes = chunk_placements[chunk_id]
 
-            for i in nodes:
-                host, port = i.split(":")
+            for node in datanodes:
+                host, port = node.split(":")
 
                 datanode_info = {
                     "host": host,
                     "port": int(port),
                 }
 
-                if send_chunk_to_datanode(chunk_data, datanode_info, chunk_id, file.filename):
-                    continue
-                else:
-                    print("lalith put raise here")
+                ok = send_chunk_to_datanode(chunk_data, datanode_info, chunk_index, file_id, chunk_hash) 
+                if not ok:
+                    raise HTTPException(status_code=500, detail=f"Failed to send chunk {chunk_index} to {host}:{port}")
         
-        final_hash = file_hash.hexdigest()
-        
-        return {
-            "filename": file.filename,
-            "num_chunks": chunk_count,
-            "file_hash": final_hash,
-            "message": f"File uploaded successfully"
-        }
+        return UploadResponse(
+            filename=file.filename,
+            file_size=file_size,
+            num_chunks=chunk_count,
+            file_id=file_id,
+            message="File uploaded successfully"
+        )
 
-    except HTTPException:
-        raise
-    
     except Exception as e:
         raise HTTPException(
             status_code=500,
