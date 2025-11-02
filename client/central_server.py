@@ -65,58 +65,46 @@ async def request_chunk_write(filename, num_chunks):
 # TODO check for ACK only then send
 
 
-def send_chunk_to_datanode(chunk_data, datanode_info, chunk_index, file_id, chunk_hash, max_retries=3):
-    logger.info("entered send to datanode")
-    for attempt in range(max_retries):
-        sock = None
-        try:
-            sock = socket(AF_INET, SOCK_STREAM)
-            sock.connect((datanode_info['host'], datanode_info['port']))
-            logger.info("created socket and connected")
-            
-            metadata = {
-                "type": "write_chunk",
-                "file_id": file_id,
-                "chunk_index": chunk_index,
-                "chunk_hash": chunk_hash
-            }
+def send_chunk_to_datanode(chunk_data, datanodes, chunk_index, file_id, chunk_hash):
+    primary = datanodes[0]
+    downstream = datanodes[1:]
+    host, port = primary.split(":")
 
-            logger.info(f"sending metadata : {metadata}")
-            
-            sock.send(json.dumps(metadata).encode())
+    try:
+        sock = socket(AF_INET, SOCK_STREAM)
+        sock.settimeout(5)
+        sock.connect((host, int(port)))
 
-            logger.info("sent data to datanode")
+        metadata = {
+            "type": "write_chunk",
+            "file_id": file_id,
+            "chunk_index": chunk_index,
+            "chunk_hash": chunk_hash,
+            "downstream": downstream
+        }
 
-            # to get an ACK
-            ack = sock.recv(4096)
-            if not ack:
-                raise Exception("No ACK from datanode")
+        logger.info(f"Sending metadata for chunk {chunk_index} → {primary}")
+        sock.send(json.dumps(metadata).encode())
 
-            #send data only after an ACK
-            sock.sendall(chunk_data)
-            
-            # Shutdown write side to signal we're done sending
-            sock.shutdown(SHUT_WR)
-            
-            # Now wait for response
-            response = sock.recv(1024)
-            sock.close()
-            
-            if b"STORED" in response:
-                return True
-            else:
-                logger.error(f"Unexpected response from datanode: {response}")
-                return False
-        
-        except Exception as e:
-            if sock:
-                sock.close()
-                logger.warning(f"Retry {attempt+1}/{max_retries} for chunk {chunk_index} to {datanode_info['host']}:{datanode_info['port']} ({e})")
-            if attempt == max_retries - 1:
-                return False
-            continue
-    
-    return False
+        ack = sock.recv(4096)
+        if not ack:
+            raise Exception("No ACK from datanode")
+
+        sock.sendall(chunk_data)
+        sock.shutdown(SHUT_WR)
+
+        response = sock.recv(1024)
+        if b"STORED" in response:
+            logger.info(f"Chunk {chunk_index} successfully stored via pipeline starting at {primary}")
+            return True
+        else:
+            logger.error(f"Unexpected response from {primary}: {response}")
+            return False
+    except Exception as e:
+        logger.error(f"Failed to send chunk {chunk_index} to {primary}: {e}")
+        return False
+    finally:
+        sock.close()
 
 
 # TODO await asyncio.gather(*upload_tasks), wanna implement this later
@@ -135,18 +123,37 @@ async def upload_file(
     logger.info(f"Requesting placement for {chunk_count} chunks")
     
     placement_response = await request_chunk_write(file.filename, chunk_count)
+    '''
+    placement response should look like this
+        {
+            "file_id": "b10a2f8a-97a5-4d30-becb-2a76d...",
+            "placements": {
+                "chunk_1": ["datanode1:5001", "datanode2:5002"],
+                "chunk_2": ["datanode2:5002", "datanode1:5001"]
+            }
+        }
+    '''
+
     logger.info(f"got placement data {placement_response}")
     if not placement_response or "placements" not in placement_response:
             raise HTTPException(status_code=500, detail="Failed to get chunk placements from Namenode")
 
     file_id = placement_response["file_id"]
     chunk_placements = placement_response["placements"]
+    '''
+    chunk_placements should look like this
+        "placements": 
+        {
+            "chunk_1": ["datanode1:5001", "datanode2:5002"],
+            "chunk_2": ["datanode2:5002", "datanode1:5001"]
+        }
+    '''
 
     try:
         chunk_index = 0
         while True:
             chunk_data = await file.read(CHUNK_SIZE)
-            logger.info(f"some chunk data read {chunk_index}")
+            logger.info(f"some chunk data read {chunk_index + 1}")
             if not chunk_data:
                 break
             
@@ -159,20 +166,16 @@ async def upload_file(
                 raise HTTPException(status_code=500, detail=f"No placement info for {chunk_id}")
 
             datanodes = chunk_placements[chunk_id]
+            '''
+            now datanodes looks like this
+                ["datanode1:5001", "datanode2:5002"]
+            '''
 
-            for node in datanodes:
-                host, port = node.split(":")
-
-                datanode_info = {
-                    "host": host,
-                    "port": int(port),
-                }
-
-                logger.info("sending to datanode")
-                ok = send_chunk_to_datanode(chunk_data, datanode_info, chunk_index, file_id, chunk_hash) 
-                logger.info("sent to datanode")
-                if not ok:
-                    raise HTTPException(status_code=500, detail=f"Failed to send chunk {chunk_index} to {host}:{port}")
+            logger.info("sending to datanode")
+            ok = send_chunk_to_datanode(chunk_data, datanodes, chunk_index, file_id, chunk_hash) 
+            logger.info("sent to datanode")
+            if not ok:
+                raise HTTPException(status_code=500, detail=f"Failed to send chunk {chunk_index} via pipeline {datanodes}")
         
         return UploadResponse(
             filename=file.filename,
@@ -191,7 +194,8 @@ async def upload_file(
         )
     
     finally:
-        await file.close()
+        if 'sock' in locals():
+            await file.close()
 
 
 @app.get("/")

@@ -31,7 +31,7 @@ services:
       - NAMENODE_PORT=5000
     volumes:
       - ./datanode:/app/datanode
-      - ./datanode/storage1:/app/datanode/storage
+      - ./datanode/storage1:/data
     ports:
     - "5001:5001"
     networks:
@@ -52,7 +52,7 @@ services:
       - NAMENODE_PORT=5000
     volumes:
       - ./datanode:/app/datanode
-      - ./datanode/storage2:/app/datanode/storage
+      - ./datanode/storage2:/data
     ports:
     - "5002:5002"
     networks:
