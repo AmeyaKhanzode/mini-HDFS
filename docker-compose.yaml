@@ -9,8 +9,10 @@ services:
     environment:
       - NAMENODE_HOST=namenode
       - NAMENODE_PORT=5000
+      - NAMENODE_REQ_PORT=5050
     ports:
       - "5000:5000"
+      - "5050:5050"
     volumes:
       - ./namenode:/app/namenode
     networks:
@@ -61,7 +63,7 @@ services:
   backend:    # fastapi
     build:
       context: .
-      dockerfile: backend/Dockerfile
+      dockerfile: client/Dockerfile
     container_name: backend
     environment:
       - NAMENODE_HOST=namenode

@@ -7,7 +7,7 @@ import json
 import logging
 import os
 from shared.commons import create_socket
-from shared.config import BACKEND_HOST, BACKEND_PORT, NAMENODE_PORT, REPLICATION_FACTOR
+from shared.config import BACKEND_HOST, BACKEND_PORT, NAMENODE_REQ_PORT, REPLICATION_FACTOR
 from heartbeat_handler import get_alive_datanodes
 
 logging.basicConfig(
@@ -15,8 +15,6 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-REQ_PORT = 5050
 
 def assign_datanodes(num_chunks):
     # algo to assign chunks
@@ -82,17 +80,21 @@ def handle_client(client_sock, addr):
 
 def req_listener():
     logger = logging.getLogger(__name__)
-    sock = create_socket("0.0.0.0", REQ_PORT)
-    sock.listen()
-    logger.info(f"Namenode request listener active on port {REQ_PORT}")
+    try:
+        sock = create_socket("0.0.0.0", NAMENODE_REQ_PORT)
+        sock.listen()
+        logger.info(f"Namenode request listener active on port {NAMENODE_REQ_PORT}")
 
-    while True:
-        client_sock, addr = sock.accept()
-        threading.Thread(
-            target=handle_client,
-            args=(client_sock, addr),
-            daemon=True
-        ).start()
+        while True:
+            client_sock, addr = sock.accept()
+            threading.Thread(
+                target=handle_client,
+                args=(client_sock, addr),
+                daemon=True
+            ).start()
+    except Exception as e:
+        logger.error(f"FATAL: Request listener failed: {e}", exc_info=True)
+        raise
 
 
             

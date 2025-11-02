@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 import json
 from socket import *
 from pydantic import BaseModel
-from shared.config import NAMENODE_HOST, NAMENODE_PORT, DATANODES, CHUNK_SIZE
+from shared.config import NAMENODE_HOST, NAMENODE_REQ_PORT, DATANODES, CHUNK_SIZE
 import hashlib
 from typing import List, Dict
 import asyncio
@@ -28,7 +28,12 @@ class UploadResponse(BaseModel):
 
 async def request_chunk_write(filename, num_chunks):
     try:
-        reader, writer = await asyncio.open_connection(NAMENODE_HOST, NAMENODE_PORT)
+        logger.info(f"Connecting to namenode at {NAMENODE_HOST}:{NAMENODE_REQ_PORT}")
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(NAMENODE_HOST, NAMENODE_REQ_PORT),
+            timeout=5.0
+        )
+        logger.info("Connected to namenode")
 
         req = {
             "type": "write_req",
@@ -36,14 +41,22 @@ async def request_chunk_write(filename, num_chunks):
             "num_chunks": num_chunks
         }
 
+        logger.info(f"Sending request: {req}")
         writer.write((json.dumps(req) + "\n").encode())
         await writer.drain()
 
-        data = await reader.readline()
+        logger.info("Waiting for response...")
+        data = await asyncio.wait_for(reader.readline(), timeout=5.0)
+        logger.info(f"Received response: {data}")
+        
         writer.close()
         await writer.wait_closed()
 
+        logger.info("Sending info to backend")
         return json.loads(data.decode().strip())
+    except asyncio.TimeoutError:
+        logger.error("Timeout waiting for namenode response")
+        return None
     except Exception as e:
         logger.error(f"Failed to get chunk placements from namenode: {e}")
         return None
@@ -53,11 +66,13 @@ async def request_chunk_write(filename, num_chunks):
 
 
 def send_chunk_to_datanode(chunk_data, datanode_info, chunk_index, file_id, chunk_hash, max_retries=3):
+    logger.info("entered send to datanode")
     for attempt in range(max_retries):
         sock = None
         try:
             sock = socket(AF_INET, SOCK_STREAM)
             sock.connect((datanode_info['host'], datanode_info['port']))
+            logger.info("created socket and connected")
             
             metadata = {
                 "type": "write_chunk",
@@ -65,8 +80,12 @@ def send_chunk_to_datanode(chunk_data, datanode_info, chunk_index, file_id, chun
                 "chunk_index": chunk_index,
                 "chunk_hash": chunk_hash
             }
+
+            logger.info(f"sending metadata : {metadata}")
             
             sock.send(json.dumps(metadata).encode())
+
+            logger.info("sent data to datanode")
 
             # to get an ACK
             ack = sock.recv(4096)
@@ -75,9 +94,19 @@ def send_chunk_to_datanode(chunk_data, datanode_info, chunk_index, file_id, chun
 
             #send data only after an ACK
             sock.sendall(chunk_data)
+            
+            # Shutdown write side to signal we're done sending
+            sock.shutdown(SHUT_WR)
+            
+            # Now wait for response
             response = sock.recv(1024)
             sock.close()
-            return True
+            
+            if b"STORED" in response:
+                return True
+            else:
+                logger.error(f"Unexpected response from datanode: {response}")
+                return False
         
         except Exception as e:
             if sock:
@@ -97,13 +126,16 @@ async def upload_file(
     file: UploadFile = File(...),
     file_size: int = Form(...)
 ):
+    logger.info(f"Upload request received: filename={file.filename}, size={file_size}")
 
     if not file:
         raise HTTPException(status_code=400, detail="No file provided")
 
     chunk_count = math.ceil(file_size / CHUNK_SIZE)
+    logger.info(f"Requesting placement for {chunk_count} chunks")
     
     placement_response = await request_chunk_write(file.filename, chunk_count)
+    logger.info(f"got placement data {placement_response}")
     if not placement_response or "placements" not in placement_response:
             raise HTTPException(status_code=500, detail="Failed to get chunk placements from Namenode")
 
@@ -114,6 +146,7 @@ async def upload_file(
         chunk_index = 0
         while True:
             chunk_data = await file.read(CHUNK_SIZE)
+            logger.info(f"some chunk data read {chunk_index}")
             if not chunk_data:
                 break
             
@@ -135,7 +168,9 @@ async def upload_file(
                     "port": int(port),
                 }
 
+                logger.info("sending to datanode")
                 ok = send_chunk_to_datanode(chunk_data, datanode_info, chunk_index, file_id, chunk_hash) 
+                logger.info("sent to datanode")
                 if not ok:
                     raise HTTPException(status_code=500, detail=f"Failed to send chunk {chunk_index} to {host}:{port}")
         
@@ -148,6 +183,8 @@ async def upload_file(
         )
 
     except Exception as e:
+        # Log full exception with traceback to help debugging
+        logger.exception("Error uploading file")
         raise HTTPException(
             status_code=500,
             detail=f"Error uploading file: {str(e)}"
@@ -163,7 +200,7 @@ async def root():
         "message": "Mini-HDFS Client API", 
         "status": "running",
         "chunk_size": f"{CHUNK_SIZE / (1024 * 1024)}MB",
-        "namenode": f"{NAMENODE_HOST}:{NAMENODE_PORT}"
+        "namenode": f"{NAMENODE_HOST}:{NAMENODE_REQ_PORT}"
     }
 
 
@@ -172,7 +209,7 @@ async def get_config():
     return {
         "namenode": {
             "host": NAMENODE_HOST,
-            "port": NAMENODE_PORT
+            "port": NAMENODE_REQ_PORT
         },
         "datanodes": DATANODES,
         "chunk_size_mb": CHUNK_SIZE / (1024 * 1024)

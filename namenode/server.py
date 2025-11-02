@@ -30,9 +30,11 @@ def monitor_down_nodes():
 monitor_thread = threading.Thread(target=monitor_down_nodes, daemon=True)
 monitor_thread.start()
 
-# to listen for request
-req_thread = threading.Thread(target=req_listener, daemon=True)
+# to listen for request - NOT daemon so we can see errors
+req_thread = threading.Thread(target=req_listener, daemon=False)
 req_thread.start()
+
+logger.info("All namenode threads started")
 
 while True:
     time.sleep(60)

@@ -3,11 +3,12 @@ import os
 CHUNK_SIZE = 2 * 1024 * 1024 # 2mb
 
 NAMENODE_HOST = os.getenv("NAMENODE_HOST", "namenode")
-NAMENODE_PORT = int(os.getenv("NAMENODE_PORT", 5000))
+NAMENODE_PORT = int(os.getenv("NAMENODE_PORT", "5000"))  # Heartbeat port
+NAMENODE_REQ_PORT = int(os.getenv("NAMENODE_REQ_PORT", "5050"))  # Client request port
 
 # Current datanode configuration (set per datanode container)
 DATANODE_HOST = os.getenv("DATANODE_HOST", "localhost")
-DATANODE_PORT = int(os.getenv("DATANODE_PORT", 5001))
+DATANODE_PORT = int(os.getenv("DATANODE_PORT", "5001"))
 
 DATANODE1_HOST = os.getenv("DATANODE1_HOST", "datanode1")
 DATANODE1_PORT = int(os.getenv("DATANODE1_PORT", 5001))
