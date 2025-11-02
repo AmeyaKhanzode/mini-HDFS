@@ -21,7 +21,7 @@ def assign_datanodes(num_chunks):
     # returns a dict of where to store {chunk1: [], chunk2: []}
     '''
     {
-        "file_id": "b10a2f8a-97a5-4d30-becb-2a76d...",
+        "file_id": "b10a2f8a-97a5-4d30-becb-2a76d...",  # temp UUID
         "placements": {
             "chunk_1": ["datanode1:5001", "datanode2:5002"],
             "chunk_2": ["datanode2:5002", "datanode1:5001"]
@@ -40,6 +40,7 @@ def assign_datanodes(num_chunks):
 
     placements = {}
 
+    # temp uuid for now, will be renamed after chunks are uploaded
     file_id = str(uuid.uuid4())
     
     random.shuffle(alive_datanodes)

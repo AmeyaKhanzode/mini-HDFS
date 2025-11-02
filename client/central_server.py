@@ -107,6 +107,42 @@ def send_chunk_to_datanode(chunk_data, datanodes, chunk_index, file_id, chunk_ha
         sock.close()
 
 
+    return False
+
+
+def request_rename(temp_id, file_hash, datanodes):
+    """Request all datanodes to rename temp UUID directory to file hash"""
+    success_count = 0
+    
+    for datanode in datanodes:
+        try:
+            host, port = datanode.split(":")
+            sock = socket(AF_INET, SOCK_STREAM)
+            sock.settimeout(5)
+            sock.connect((host, int(port)))
+            
+            metadata = {
+                "type": "rename_file",
+                "old_id": temp_id,
+                "new_id": file_hash
+            }
+            
+            sock.send(json.dumps(metadata).encode())
+            response = sock.recv(1024)
+            sock.close()
+            
+            if b"RENAMED" in response:
+                logger.info(f"Renamed {temp_id} → {file_hash} on {datanode}")
+                success_count += 1
+            else:
+                logger.error(f"Failed to rename on {datanode}: {response}")
+                
+        except Exception as e:
+            logger.error(f"Error renaming on {datanode}: {e}")
+    
+    return success_count
+
+
 # TODO await asyncio.gather(*upload_tasks), wanna implement this later
 
 @app.post("/upload")
@@ -149,16 +185,23 @@ async def upload_file(
         }
     '''
 
+    # Calculate file hash incrementally while uploading chunks
+    file_hasher = hashlib.sha256()
+
     try:
         chunk_index = 0
         while True:
             chunk_data = await file.read(CHUNK_SIZE)
-            logger.info(f"some chunk data read {chunk_index + 1}")
             if not chunk_data:
                 break
             
-
             chunk_index += 1
+            
+            # Update file hash incrementally
+            file_hasher.update(chunk_data)
+            
+            logger.info(f"Processing chunk {chunk_index}/{chunk_count}")
+            
             chunk_id = f"chunk_{chunk_index}"
             chunk_hash = hashlib.sha256(chunk_data).hexdigest()
 
@@ -177,12 +220,23 @@ async def upload_file(
             if not ok:
                 raise HTTPException(status_code=500, detail=f"Failed to send chunk {chunk_index} via pipeline {datanodes}")
         
+        # After all chunks uploaded, get final file hash
+        file_hash = file_hasher.hexdigest()
+        
+        # Collect all unique datanodes that received chunks
+        all_datanodes = set()
+        for chunk_id, nodes in chunk_placements.items():
+            all_datanodes.update(nodes)
+        
+        # Request rename on all datanodes: temp_id → file_hash
+        renamed_count = request_rename(file_id, file_hash, all_datanodes)
+        
         return UploadResponse(
             filename=file.filename,
             file_size=file_size,
             num_chunks=chunk_count,
-            file_id=file_id,
-            message="File uploaded successfully"
+            file_id=file_hash,
+            message=f"File uploaded successfully"
         )
 
     except Exception as e:

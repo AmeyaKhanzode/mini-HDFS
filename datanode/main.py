@@ -82,6 +82,37 @@ def handle_storage(conn, addr):
 
         json_metadata = json.loads(metadata.decode())
 
+        # Handle rename request for deduplication
+        if json_metadata["type"] == "rename_file":
+            old_id = json_metadata["old_id"]
+            new_id = json_metadata["new_id"]
+            
+            old_path = os.path.join(STORAGE_PATH, old_id)
+            new_path = os.path.join(STORAGE_PATH, new_id)
+            
+            try:
+                if os.path.exists(old_path):
+                    # Check if new_path already exists (file was already uploaded before - deduplication!)
+                    if os.path.exists(new_path):
+                        logger.info(f"File {new_id} already exists - deduplication! Removing {old_id}")
+                        # Remove the duplicate data
+                        import shutil
+                        shutil.rmtree(old_path)
+                    else:
+                        # Rename to content-based hash
+                        os.rename(old_path, new_path)
+                        logger.info(f"Renamed {old_id} → {new_id}")
+                    
+                    conn.send(b"RENAMED")
+                else:
+                    logger.warning(f"Old path {old_path} does not exist")
+                    conn.send(b"NOT_FOUND")
+            except Exception as e:
+                logger.error(f"Failed to rename {old_id} → {new_id}: {e}")
+                conn.send(b"ERROR")
+            
+            return
+
         # if the below condition satisfies meaning its a "request" on that node
         if json_metadata["type"] in ("write_chunk", "replicate_chunk"):
             file_id = json_metadata["file_id"]
