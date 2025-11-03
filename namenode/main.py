@@ -9,6 +9,7 @@ import os
 from shared.commons import create_socket
 from shared.config import BACKEND_HOST, BACKEND_PORT, NAMENODE_REQ_PORT, REPLICATION_FACTOR
 from heartbeat_handler import get_alive_datanodes
+from db_utils import store_file_metadata, get_file_metadata, get_chunk_locations
 
 logging.basicConfig(
     level=logging.INFO,
@@ -66,7 +67,6 @@ def handle_client(client_sock, addr):
         req_data = json.loads(data.decode())
         if req_data:
             if req_data.get("type") == "write_req":
-                # TODO call function to add metadata to metastore after all the replication and storage is done
                 filename = req_data.get("filename")
                 num_chunks = req_data.get("num_chunks")
 
@@ -74,6 +74,27 @@ def handle_client(client_sock, addr):
 
                 chunk_placements = assign_datanodes(num_chunks)
                 client_sock.sendall((json.dumps(chunk_placements) + "\n").encode())
+            
+            elif req_data.get("type") == "metadata_write":
+                filename = req_data.get("filename")
+                file_hash = req_data.get("file_hash")
+                file_size = req_data.get("file_size")
+                num_chunks = req_data.get("num_chunks")
+                placements = req_data.get("placements")
+                chunk_hashes = req_data.get("chunk_hashes", [])
+                
+                # Store metadata in database
+                success = store_file_metadata(file_hash, filename, file_size, num_chunks, placements, chunk_hashes)
+                
+                if success:
+                    logger.info(f"Stored metadata for {filename} (hash: {file_hash})")
+                    response = {"status": "ok"}
+                else:
+                    logger.error(f"Failed to store metadata for {filename}")
+                    response = {"status": "error"}
+                
+                client_sock.sendall((json.dumps(response) + "\n").encode())
+                
     except Exception as e:
             logger.error(f"Error handling client {addr}: {e}")
     finally:

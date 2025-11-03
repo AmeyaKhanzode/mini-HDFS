@@ -62,10 +62,41 @@ async def request_chunk_write(filename, num_chunks):
         return None
 
 
+async def store_metadata(filename, file_hash, file_size, num_chunks, placements, chunk_hashes):
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(NAMENODE_HOST, NAMENODE_REQ_PORT),
+            timeout=5.0
+        )
+
+        req = {
+            "type": "metadata_write",
+            "filename": filename,
+            "file_hash": file_hash,
+            "file_size": file_size,
+            "num_chunks": num_chunks,
+            "placements": placements,
+            "chunk_hashes": chunk_hashes
+        }
+
+        writer.write((json.dumps(req) + "\n").encode())
+        await writer.drain()
+
+        data = await asyncio.wait_for(reader.readline(), timeout=5.0)
+        response = json.loads(data.decode().strip())
+        
+        writer.close()
+        await writer.wait_closed()
+        
+        return response.get("status") == "ok"
+    except Exception as e:
+        logger.error(f"Failed to store metadata on namenode: {e}")
+        return False
+
+
 # TODO check for ACK only then send
 
-
-def send_chunk_to_datanode(chunk_data, datanodes, chunk_index, file_id, chunk_hash):
+def send_chunk_to_datanode(filename, chunk_data, datanodes, chunk_index, file_id, chunk_hash):
     primary = datanodes[0]
     downstream = datanodes[1:]
     host, port = primary.split(":")
@@ -96,6 +127,9 @@ def send_chunk_to_datanode(chunk_data, datanodes, chunk_index, file_id, chunk_ha
         response = sock.recv(1024)
         if b"STORED" in response:
             logger.info(f"Chunk {chunk_index} successfully stored via pipeline starting at {primary}")
+
+            # TODO store metadata here
+
             return True
         else:
             logger.error(f"Unexpected response from {primary}: {response}")
@@ -187,6 +221,7 @@ async def upload_file(
 
     # Calculate file hash incrementally while uploading chunks
     file_hasher = hashlib.sha256()
+    chunk_hashes = []
 
     try:
         chunk_index = 0
@@ -204,6 +239,7 @@ async def upload_file(
             
             chunk_id = f"chunk_{chunk_index}"
             chunk_hash = hashlib.sha256(chunk_data).hexdigest()
+            chunk_hashes.append(chunk_hash)
 
             if chunk_id not in chunk_placements:
                 raise HTTPException(status_code=500, detail=f"No placement info for {chunk_id}")
@@ -215,7 +251,7 @@ async def upload_file(
             '''
 
             logger.info("sending to datanode")
-            ok = send_chunk_to_datanode(chunk_data, datanodes, chunk_index, file_id, chunk_hash) 
+            ok = send_chunk_to_datanode(file.filename, chunk_data, datanodes, chunk_index, file_id, chunk_hash) 
             logger.info("sent to datanode")
             if not ok:
                 raise HTTPException(status_code=500, detail=f"Failed to send chunk {chunk_index} via pipeline {datanodes}")
@@ -230,6 +266,19 @@ async def upload_file(
         
         # Request rename on all datanodes: temp_id → file_hash
         renamed_count = request_rename(file_id, file_hash, all_datanodes)
+        
+        # Store metadata on namenode
+        metadata_stored = await store_metadata(
+            filename=file.filename,
+            file_hash=file_hash,
+            file_size=file_size,
+            num_chunks=chunk_count,
+            placements=chunk_placements,
+            chunk_hashes=chunk_hashes
+        )
+        
+        if not metadata_stored:
+            logger.warning("Failed to store metadata on namenode")
         
         return UploadResponse(
             filename=file.filename,
