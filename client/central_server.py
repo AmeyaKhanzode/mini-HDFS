@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 import logging
 import math
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import json
 from socket import *
 from pydantic import BaseModel
@@ -10,6 +10,7 @@ from shared.commons import *
 import hashlib
 from typing import List, Dict
 import asyncio
+import io
 
 logging.basicConfig(
     level=logging.INFO,
@@ -196,6 +197,58 @@ def get_chunk_map(filename):
         return None
 
 
+def fetch_chunk_from_datanode(file_hash, chunk_hash, chunk_index, datanode_addr):
+    """
+    Fetch a single chunk from a datanode
+    Args:
+        file_hash: The hash of the file (used as file_id)
+        chunk_hash: The hash of the specific chunk
+        chunk_index: The index of the chunk
+        datanode_addr: "host:port" string
+    Returns:
+        bytes: The chunk data, or None if failed
+    """
+    try:
+        host, port = datanode_addr.split(":")
+        sock = socket(AF_INET, SOCK_STREAM)
+        sock.settimeout(10)
+        sock.connect((host, int(port)))
+        
+        # Send read request to datanode
+        metadata = {
+            "type": "read_chunk",
+            "file_id": file_hash,
+            "chunk_hash": chunk_hash,
+            "chunk_index": chunk_index
+        }
+        
+        logger.info(f"Requesting chunk {chunk_index} from {datanode_addr}")
+        sock.send(json.dumps(metadata).encode())
+        
+        # Receive chunk data
+        chunk_data = b""
+        while True:
+            data = sock.recv(4096)
+            if not data:
+                break
+            chunk_data += data
+        
+        sock.close()
+        
+        # Verify chunk hash
+        received_hash = hashlib.sha256(chunk_data).hexdigest()
+        if received_hash != chunk_hash:
+            logger.error(f"Chunk {chunk_index} hash mismatch! Expected {chunk_hash}, got {received_hash}")
+            return None
+            
+        logger.info(f"Successfully fetched chunk {chunk_index} from {datanode_addr} ({len(chunk_data)} bytes)")
+        return chunk_data
+        
+    except Exception as e:
+        logger.error(f"Failed to fetch chunk {chunk_index} from {datanode_addr}: {e}")
+        return None
+
+
 # TODO await asyncio.gather(*upload_tasks), wanna implement this later
 
 @app.post("/upload")
@@ -375,3 +428,90 @@ async def list_files():
     except Exception as e:
         logger.error(f"Error listing files: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/download/{filename}")
+async def download_file(filename: str):
+    """
+    Download a file by fetching all chunks from datanodes and reconstructing it
+    """
+    try:
+        logger.info(f"Download request received for: {filename}")
+        
+        # Get chunk map from namenode
+        chunk_map_response = get_chunk_map(filename)
+        
+        if not chunk_map_response or chunk_map_response.get("status") != "ok":
+            error_msg = chunk_map_response.get("message", "File not found") if chunk_map_response else "Failed to get chunk map"
+            raise HTTPException(status_code=404, detail=error_msg)
+        
+        chunk_map = chunk_map_response.get("chunk_map", {})
+        file_hash = chunk_map_response.get("file_hash")
+        
+        if not chunk_map:
+            raise HTTPException(status_code=404, detail="No chunks found for file")
+        
+        logger.info(f"Received chunk map with {len(chunk_map)} chunks")
+        
+        # Parse and sort chunks by index
+        # chunk_map format: {"chunk_hash_index": "host:port", ...}
+        chunk_list = []
+        for key, datanode_addr in chunk_map.items():
+            # Parse "chunk_hash_chunk_index" format
+            parts = key.rsplit("_", 1)
+            if len(parts) != 2:
+                logger.error(f"Invalid chunk key format: {key}")
+                continue
+            
+            chunk_hash = parts[0]
+            chunk_index = int(parts[1])
+            
+            chunk_list.append({
+                "index": chunk_index,
+                "hash": chunk_hash,
+                "datanode": datanode_addr
+            })
+        
+        # Sort by chunk index
+        chunk_list.sort(key=lambda x: x["index"])
+        
+        logger.info(f"Sorted {len(chunk_list)} chunks, fetching from datanodes...")
+        
+        # Fetch all chunks in order
+        file_data = io.BytesIO()
+        
+        for chunk_info in chunk_list:
+            chunk_data = fetch_chunk_from_datanode(
+                file_hash=file_hash,
+                chunk_hash=chunk_info["hash"],
+                chunk_index=chunk_info["index"],
+                datanode_addr=chunk_info["datanode"]
+            )
+            
+            if chunk_data is None:
+                raise HTTPException(
+                    status_code=500, 
+                    detail=f"Failed to fetch chunk {chunk_info['index']} from {chunk_info['datanode']}"
+                )
+            
+            file_data.write(chunk_data)
+        
+        # Reset stream position to beginning
+        file_data.seek(0)
+        
+        logger.info(f"Successfully reconstructed file {filename} ({file_data.getbuffer().nbytes} bytes)")
+        
+        # Return file as streaming response
+        return StreamingResponse(
+            file_data,
+            media_type="application/octet-stream",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error downloading file")
+        raise HTTPException(status_code=500, detail=f"Error downloading file: {str(e)}")
