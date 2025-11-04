@@ -1,7 +1,4 @@
 from socket import *
-import time
-import logging
-import os
 
 
 def create_socket(bind_addr, port):
@@ -10,3 +7,13 @@ def create_socket(bind_addr, port):
     sock.bind((bind_addr, port))
 
     return sock
+
+def read_till_newline(sock, buffer_size=4096):
+    data = b""
+
+    while b"\n" not in data:
+        chunk = sock.recv(buffer_size)
+        if not chunk:
+            raise ConnectionError("some shit happened in reading chunks")
+        data += chunk
+    return data.decode().strip()

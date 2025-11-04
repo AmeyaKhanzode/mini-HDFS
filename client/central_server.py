@@ -1,6 +1,4 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
 import logging
 import math
 from fastapi.responses import JSONResponse
@@ -8,6 +6,7 @@ import json
 from socket import *
 from pydantic import BaseModel
 from shared.config import NAMENODE_HOST, NAMENODE_REQ_PORT, DATANODES, CHUNK_SIZE
+from shared.commons import *
 import hashlib
 from typing import List, Dict
 import asyncio
@@ -19,8 +18,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
-
-app.mount("/static", StaticFiles(directory="client/static"), name="static")
 
 class UploadResponse(BaseModel):
     filename: str
@@ -98,8 +95,6 @@ async def store_metadata(filename, file_hash, file_size, num_chunks, placements,
         return False
 
 
-# TODO check for ACK only then send
-
 def send_chunk_to_datanode(filename, chunk_data, datanodes, chunk_index, file_id, chunk_hash):
     primary = datanodes[0]
     downstream = datanodes[1:]
@@ -144,10 +139,6 @@ def send_chunk_to_datanode(filename, chunk_data, datanodes, chunk_index, file_id
     finally:
         sock.close()
 
-
-    return False
-
-
 def request_rename(temp_id, file_hash, datanodes):
     """Request all datanodes to rename temp UUID directory to file hash"""
     success_count = 0
@@ -179,6 +170,30 @@ def request_rename(temp_id, file_hash, datanodes):
             logger.error(f"Error renaming on {datanode}: {e}")
     
     return success_count
+
+def get_chunk_map(filename):
+
+    req = {
+        "type": "read_req",
+        "subtype": "read_file",
+        "filename": filename
+    }
+
+    try:
+        sock = socket(AF_INET, SOCK_STREAM)
+        sock.settimeout(5.0)
+        sock.connect((NAMENODE_HOST, NAMENODE_REQ_PORT))
+
+        sock.sendall((json.dumps(req) + "\n").encode())
+
+        data = read_till_newline(sock)
+        json_data = json.loads(data)
+        
+        sock.close()
+        return json_data
+    except Exception as e:
+        logger.error(f"Error getting chunk map: {e}")
+        return None
 
 
 # TODO await asyncio.gather(*upload_tasks), wanna implement this later
@@ -305,11 +320,6 @@ async def upload_file(
             await file.close()
 
 
-@app.get("/")
-async def root():
-    return FileResponse("client/static/index.html")
-
-
 @app.get("/api/status")
 async def status():
     return {
@@ -330,3 +340,38 @@ async def get_config():
         "datanodes": DATANODES,
         "chunk_size_mb": CHUNK_SIZE / (1024 * 1024)
     }
+
+@app.get("/list_files")
+async def list_files():
+    """Get list of all files from namenode using sync socket"""
+    try:
+        # Use synchronous socket - FastAPI will run this in a thread pool
+        sock = socket(AF_INET, SOCK_STREAM)
+        sock.settimeout(5.0)
+        sock.connect((NAMENODE_HOST, NAMENODE_REQ_PORT))
+        
+        req = {
+            "type": "read_req",
+            "subtype": "list_files"
+        }
+        
+        # Send request
+        sock.sendall((json.dumps(req) + "\n").encode())
+        
+        # Receive response
+        response_data = sock.recv(4096).decode()
+        sock.close()
+        
+        response = json.loads(response_data)
+        
+        if response.get("status") == "ok":
+            return {"files": response.get("files", [])}
+        else:
+            raise HTTPException(status_code=500, detail=response.get("message", "Failed to fetch files"))
+            
+    except timeout:
+        logger.error("Timeout connecting to namenode")
+        raise HTTPException(status_code=503, detail="Namenode unavailable")
+    except Exception as e:
+        logger.error(f"Error listing files: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

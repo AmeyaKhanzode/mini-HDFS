@@ -80,15 +80,15 @@ def store_file_metadata(file_hash, file_name, file_size, num_chunks, placements,
         print(f"Error storing metadata: {e}")
         return False
 
-def get_file_metadata(file_hash):
+def get_file_metadata(filename):
     conn = get_connection()
     cur = conn.cursor()
     
     result = cur.execute("""
-        SELECT file_hash, file_name, file_size, upload_time, num_chunks
+        SELECT file_hash, file_size, upload_time, num_chunks
         FROM file_metadata
-        WHERE file_hash = ?
-    """, (file_hash,)).fetchone()
+        WHERE file_name = ?
+    """, (filename,)).fetchone()
     
     conn.close()
     

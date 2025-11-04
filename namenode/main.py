@@ -9,7 +9,8 @@ import os
 from shared.commons import create_socket
 from shared.config import BACKEND_HOST, BACKEND_PORT, NAMENODE_REQ_PORT, REPLICATION_FACTOR
 from heartbeat_handler import get_alive_datanodes
-from db_utils import store_file_metadata, get_file_metadata, get_chunk_locations
+from db_utils import store_file_metadata, get_file_metadata, get_chunk_locations, list_all_files
+from ping3 import ping
 
 logging.basicConfig(
     level=logging.INFO,
@@ -66,7 +67,83 @@ def handle_client(client_sock, addr):
 
         req_data = json.loads(data.decode())
         if req_data:
-            if req_data.get("type") == "write_req":
+            if req_data.get("type") == "read_req":
+                subtype = req_data.get("subtype")
+                
+                if subtype == "list_files":
+                    # Get all files from database
+                    files = list_all_files()
+                    response = {"status": "ok", "files": files}
+                    client_sock.sendall((json.dumps(response) + "\n").encode())
+                elif subtype == "read_file":
+                    """
+                    incoming data is probably like:
+                    {
+                        "type": "read_req",
+                        "subtype": "read_file",
+                        "filename": "changes.md"
+                    }
+                    """
+                    filename = req_data.get("filename")
+
+                    file_metadata = get_file_metadata(filename)
+                    file_hash = file_metadata.get("file_hash") if file_metadata else None
+                    
+                    if file_hash is not None:
+                        chunk_locations = get_chunk_locations(file_hash)
+
+                        """
+                        chunk_locations should look something like this:
+                            {
+                                "0": {
+                                    "chunk_hash": j09s10j90h819hhasjdk10912asda,
+                                    "datanodes": ["datanode1:5001", "datanode:5002"]
+                                }
+                                "1": {
+                                    "chunk_hash": jkasdhu12hwkjhsa90d1982hudau1,
+                                    "datanodes": ["datanode2:5002", "datanode1:5001"]
+                                }
+                            }
+                        """
+                        try:
+                            indices = sorted(chunk_locations.keys(), key=lambda k: int(k))
+                        except Exception:
+                            indices = list(chunk_locations.keys())
+
+                        chunk_host_map = {}
+
+                        for chunk_index in indices:
+                            datanodes = chunk_locations[chunk_index]["datanodes"]
+                            chunk_hash = chunk_locations[chunk_index]["chunk_hash"]
+
+                            # find the first node thats actually up from the list
+                            found_up_node = False
+                            for node in datanodes:
+                                host = node.split(":")[0]
+                                port = node.split(":")[1]
+
+                                if ping(host):
+                                    found_up_node = True
+                                    chunk_host_map[f"{chunk_hash}_{chunk_index}"] = f"{host}:{port}"
+                                    break
+                            
+                            if not found_up_node:
+                                logger.error(f"No datanodes available for chunk: {chunk_hash}")
+                                error_msg = {"status": "error", "message": "no available datanode"}
+                                client_sock.sendall((json.dumps(error_msg) + "\n").encode())
+                                return
+
+                        client_sock.sendall((json.dumps(chunk_host_map) + "\n").encode())
+                        logger.info(f"Sending chunk map to the backend")
+                    else:
+                        error_msg = {"message": "File doesn't exist"}
+                        client_sock.sendall((json.dumps(error_msg) + "\n").encode())
+                            
+                else:
+                    response = {"status": "error", "message": "Unknown read subtype"}
+                    client_sock.sendall((json.dumps(response) + "\n").encode())
+
+            elif req_data.get("type") == "write_req":
                 filename = req_data.get("filename")
                 num_chunks = req_data.get("num_chunks")
 

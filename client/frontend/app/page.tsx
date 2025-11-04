@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useCallback } from 'react'
-import { Upload, File, CheckCircle2, XCircle, HardDrive, Database, Zap, Shield } from 'lucide-react'
+import { useState, useCallback, useEffect } from 'react'
+import { Upload, File, CheckCircle2, XCircle, HardDrive, Database, Zap, Shield, Download, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
@@ -14,6 +14,14 @@ interface UploadResult {
   num_chunks: number
 }
 
+interface StoredFile {
+  file_hash: string
+  file_name: string
+  file_size: number
+  upload_time: string
+  num_chunks: number
+}
+
 export default function Home() {
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -21,6 +29,9 @@ export default function Home() {
   const [result, setResult] = useState<UploadResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isDragging, setIsDragging] = useState(false)
+  const [files, setFiles] = useState<StoredFile[]>([])
+  const [loadingFiles, setLoadingFiles] = useState(false)
+  const [filesError, setFilesError] = useState<string | null>(null)
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0]
@@ -95,6 +106,40 @@ export default function Home() {
     setError(null)
     setProgress(0)
   }
+
+  const fetchFiles = async () => {
+    setLoadingFiles(true)
+    setFilesError(null)
+    try {
+      const response = await fetch('/api/list_files')
+      if (!response.ok) {
+        throw new Error('Failed to fetch files')
+      }
+      const data = await response.json()
+      setFiles(data.files || [])
+    } catch (err) {
+      setFilesError(err instanceof Error ? err.message : 'Failed to load files')
+    } finally {
+      setLoadingFiles(false)
+    }
+  }
+
+  const handleDownload = async (fileHash: string, fileName: string) => {
+    // TODO: Implement download functionality
+    console.log('Download:', fileHash, fileName)
+    alert('Download functionality coming soon!')
+  }
+
+  useEffect(() => {
+    fetchFiles()
+  }, [])
+
+  useEffect(() => {
+    if (result) {
+      // Refresh file list after successful upload
+      fetchFiles()
+    }
+  }, [result])
 
   const formatFileSize = (bytes: number) => {
     if (bytes === 0) return '0 Bytes'
@@ -284,6 +329,94 @@ export default function Home() {
                   <AlertTitle className="font-bold text-xl">Upload Failed</AlertTitle>
                   <AlertDescription className="text-base mt-2">{error}</AlertDescription>
                 </Alert>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Files List Section */}
+          <Card className="max-w-4xl mx-auto mt-12 shadow-2xl bg-white/95 backdrop-blur-sm border-white/50">
+            <CardHeader className="border-b bg-gradient-to-r from-emerald-50 to-blue-50">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-3xl font-bold text-slate-900">Stored Files</CardTitle>
+                  <CardDescription className="text-slate-600">Browse and download your distributed files</CardDescription>
+                </div>
+                <Button 
+                  onClick={fetchFiles} 
+                  disabled={loadingFiles}
+                  size="lg"
+                  variant="outline"
+                  className="shadow-lg"
+                >
+                  <RefreshCw className={`h-5 w-5 mr-2 ${loadingFiles ? 'animate-spin' : ''}`} />
+                  Refresh
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="p-8">
+              {filesError && (
+                <Alert variant="destructive" className="mb-6">
+                  <XCircle className="h-5 w-5" />
+                  <AlertTitle>Error</AlertTitle>
+                  <AlertDescription>{filesError}</AlertDescription>
+                </Alert>
+              )}
+
+              {loadingFiles && (
+                <div className="text-center py-12">
+                  <RefreshCw className="h-12 w-12 mx-auto text-blue-600 animate-spin mb-4" />
+                  <p className="text-slate-600">Loading files...</p>
+                </div>
+              )}
+
+              {!loadingFiles && files.length === 0 && (
+                <div className="text-center py-12">
+                  <File className="h-16 w-16 mx-auto text-slate-400 mb-4" />
+                  <p className="text-lg text-slate-600 font-medium">No files stored yet</p>
+                  <p className="text-sm text-slate-500 mt-2">Upload your first file to get started</p>
+                </div>
+              )}
+
+              {!loadingFiles && files.length > 0 && (
+                <div className="space-y-4">
+                  {files.map((file) => (
+                    <div
+                      key={file.file_hash}
+                      className="bg-gradient-to-br from-slate-50 to-blue-50 border-2 border-slate-200 rounded-xl p-6 hover:shadow-lg transition-all duration-300 hover:scale-[1.02]"
+                    >
+                      <div className="flex items-center gap-6">
+                        <div className="bg-blue-100 p-4 rounded-xl">
+                          <File className="h-12 w-12 text-blue-600" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-semibold text-xl text-slate-900 truncate mb-2">{file.file_name}</h3>
+                          <div className="flex flex-wrap gap-4 text-sm text-slate-600">
+                            <div>
+                              <span className="font-medium">Size:</span> {formatFileSize(file.file_size)}
+                            </div>
+                            <div>
+                              <span className="font-medium">Chunks:</span> {file.num_chunks}
+                            </div>
+                            <div>
+                              <span className="font-medium">Uploaded:</span> {new Date(file.upload_time).toLocaleString()}
+                            </div>
+                          </div>
+                          <div className="mt-2">
+                            <span className="text-xs text-slate-500 font-mono">Hash: {file.file_hash.substring(0, 32)}...</span>
+                          </div>
+                        </div>
+                        <Button
+                          onClick={() => handleDownload(file.file_hash, file.file_name)}
+                          size="lg"
+                          className="shadow-lg hover:scale-105 transition-transform"
+                        >
+                          <Download className="h-5 w-5 mr-2" />
+                          Download
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </CardContent>
           </Card>
