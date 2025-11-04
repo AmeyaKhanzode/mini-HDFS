@@ -1,0 +1,5 @@
+# Exclude frontend from language statistics
+client/frontend/** linguist-vendored
+
+# Mark Python files explicitly
+*.py linguist-language=Python

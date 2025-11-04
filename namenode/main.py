@@ -6,7 +6,7 @@ from socket import *
 import json
 import logging
 import os
-from shared.commons import create_socket
+from shared.commons import create_socket, read_till_newline
 from shared.config import BACKEND_HOST, BACKEND_PORT, NAMENODE_REQ_PORT, REPLICATION_FACTOR
 from heartbeat_handler import get_alive_datanodes
 from db_utils import store_file_metadata, get_file_metadata, get_chunk_locations, list_all_files
@@ -61,11 +61,11 @@ def assign_datanodes(num_chunks):
 def handle_client(client_sock, addr):
     logger = logging.getLogger(__name__)
     try:
-        data = client_sock.recv(4096)
+        data = read_till_newline(client_sock)
         if not data:
             return
 
-        req_data = json.loads(data.decode())
+        req_data = json.loads(data)
         if req_data:
             if req_data.get("type") == "read_req":
                 subtype = req_data.get("subtype")
@@ -133,10 +133,14 @@ def handle_client(client_sock, addr):
                                 client_sock.sendall((json.dumps(error_msg) + "\n").encode())
                                 return
 
-                        client_sock.sendall((json.dumps(chunk_host_map) + "\n").encode())
+                        client_sock.sendall((json.dumps({
+                            "status": "ok",
+                            "file_hash": file_hash,
+                            "chunk_map": chunk_host_map
+                        }) + "\n").encode())
                         logger.info(f"Sending chunk map to the backend")
                     else:
-                        error_msg = {"message": "File doesn't exist"}
+                        error_msg = {"status": "error", "message": "File doesn't exist"}
                         client_sock.sendall((json.dumps(error_msg) + "\n").encode())
                             
                 else:

@@ -8,13 +8,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsqlite3-dev \
  && rm -rf /var/lib/apt/lists/*
 
-# Copy shared modules and datanode code
-COPY ../shared /app/shared/
-COPY . /app/namenode/
+# Copy shared modules and namenode code
+COPY shared /app/shared/
+COPY namenode /app/namenode/
+
+# Install Python dependencies
+COPY namenode/requirements.txt /app/namenode/requirements.txt
+RUN pip install --no-cache-dir -r /app/namenode/requirements.txt
 
 ENV PYTHONPATH="/app"
 
 WORKDIR /app/namenode
 
-# Run the datanode socket handler
+# Run the namenode socket handler
 CMD ["python", "server.py"]

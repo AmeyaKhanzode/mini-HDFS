@@ -51,7 +51,7 @@ def replicate_chunk(downstream_nodes, file_id, chunk_index, chunk_data, chunk_ha
             "downstream": next_downstream
         }
 
-        sock.send(json.dumps(metadata).encode())
+        sock.sendall(json.dumps(metadata).encode())
         ack = sock.recv(1024)
         if not ack:
             raise Exception("No ACK from downstream node")
@@ -103,13 +103,13 @@ def handle_storage(conn, addr):
                         os.rename(old_path, new_path)
                         logger.info(f"Renamed {old_id} → {new_id}")
                     
-                    conn.send(b"RENAMED")
+                    conn.sendall(b"RENAMED")
                 else:
                     logger.warning(f"Old path {old_path} does not exist")
-                    conn.send(b"NOT_FOUND")
+                    conn.sendall(b"NOT_FOUND")
             except Exception as e:
                 logger.error(f"Failed to rename {old_id} → {new_id}: {e}")
-                conn.send(b"ERROR")
+                conn.sendall(b"ERROR")
             
             return
 
@@ -136,8 +136,21 @@ def handle_storage(conn, addr):
             if downstream:
                 replicate_chunk(downstream, file_id, chunk_index, chunk_data, chunk_hash)
 
-            conn.send(b"STORED")
+            conn.sendall(b"STORED")
             logger.info(f"Completed write for chunk {chunk_index} (downstream={downstream})")
+
+        elif json_metadata["type"] == "read_chunk":
+            try:
+                file_hash = json_metadata.get("file_hash")
+                chunk_name = json_metadata.get("chunk_name")
+
+                chunk_path = os.path.join(STORAGE_PATH, file_hash, chunk_name)
+                with open(chunk_path, "rb") as f:
+                    chunk_data = f.read()
+                
+                conn.sendall(chunk_data)
+            except Exception as e:
+                logger.error(f"Couldnt retrieve chunk. Error: {e}")
 
     except Exception as e:
         logger.error(f"Failed to handle client {addr}: {e}")

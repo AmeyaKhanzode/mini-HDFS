@@ -12,6 +12,7 @@ interface UploadResult {
   file_id: string
   file_size: number
   num_chunks: number
+  message: string
 }
 
 interface StoredFile {
@@ -70,6 +71,7 @@ export default function Home() {
 
     const formData = new FormData()
     formData.append('file', file)
+    formData.append('file_size', file.size.toString())
 
     const xhr = new XMLHttpRequest()
 
@@ -86,7 +88,12 @@ export default function Home() {
         setResult(response)
         setFile(null)
       } else {
-        setError(`Upload failed: ${xhr.statusText}`)
+        try {
+          const errorResponse = JSON.parse(xhr.responseText)
+          setError(`Upload failed: ${errorResponse.detail || xhr.statusText}`)
+        } catch {
+          setError(`Upload failed: ${xhr.statusText}`)
+        }
       }
       setUploading(false)
     })
@@ -124,10 +131,31 @@ export default function Home() {
     }
   }
 
-  const handleDownload = async (fileHash: string, fileName: string) => {
-    // TODO: Implement download functionality
-    console.log('Download:', fileHash, fileName)
-    alert('Download functionality coming soon!')
+  const handleDownload = async (fileName: string) => {
+    try {
+      const response = await fetch(`/api/download/${encodeURIComponent(fileName)}`)
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Download failed' }))
+        throw new Error(errorData.detail || 'Download failed')
+      }
+
+      // Create blob from response
+      const blob = await response.blob()
+      
+      // Create download link
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      
+      // Cleanup
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+    } catch (err) {
+      alert(`Download failed: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    }
   }
 
   useEffect(() => {
@@ -201,225 +229,223 @@ export default function Home() {
             </Card>
           </div>
 
-          {/* Upload Card */}
-          <Card className="max-w-4xl mx-auto shadow-2xl bg-white/95 backdrop-blur-sm border-white/50">
-            <CardHeader className="border-b bg-gradient-to-r from-blue-50 to-slate-50">
-              <CardTitle className="text-3xl font-bold text-slate-900">Upload Files</CardTitle>
-              <CardDescription className="text-slate-600">Drag and drop or click to select files for upload</CardDescription>
-            </CardHeader>
-            <CardContent className="p-8 space-y-6">
-              {!file && !result && (
-                <div
-                  onDrop={handleDrop}
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onClick={() => document.getElementById('file-input')?.click()}
-                  className={`border-2 border-dashed rounded-xl p-16 text-center cursor-pointer transition-all duration-300 ${
-                    isDragging
-                      ? 'border-blue-500 bg-gradient-to-br from-blue-50 to-indigo-50 scale-105 shadow-xl'
-                      : 'border-slate-300 hover:border-blue-400 hover:bg-gradient-to-br hover:from-slate-50 hover:to-blue-50 hover:shadow-lg'
-                  }`}
-                >
-                  <div className={`transition-transform duration-300 ${isDragging ? 'scale-110' : ''}`}>
-                    <Upload className="mx-auto h-20 w-20 text-blue-600 mb-6" />
-                    <p className="text-2xl font-semibold text-slate-900 mb-3">
-                      Drop your file here or click to browse
-                    </p>
-                    <p className="text-base text-slate-500">
-                      Supports all file types • Automatic chunking and replication
-                    </p>
+          {/* Upload and Download Cards - Side by Side */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12">
+            {/* Upload Card */}
+            <Card className="shadow-2xl bg-white/95 backdrop-blur-sm border-white/50">
+              <CardHeader className="border-b bg-gradient-to-r from-blue-50 to-slate-50">
+                <CardTitle className="text-2xl font-bold text-slate-900">Upload Files</CardTitle>
+                <CardDescription className="text-slate-600">Drag and drop or click to select files</CardDescription>
+              </CardHeader>
+              <CardContent className="p-6 space-y-6 min-h-[500px]">
+                {!file && !result && (
+                  <div
+                    onDrop={handleDrop}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onClick={() => document.getElementById('file-input')?.click()}
+                    className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-all duration-300 ${
+                      isDragging
+                        ? 'border-blue-500 bg-gradient-to-br from-blue-50 to-indigo-50 scale-105 shadow-xl'
+                        : 'border-slate-300 hover:border-blue-400 hover:bg-gradient-to-br hover:from-slate-50 hover:to-blue-50 hover:shadow-lg'
+                    }`}
+                  >
+                    <div className={`transition-transform duration-300 ${isDragging ? 'scale-110' : ''}`}>
+                      <Upload className="mx-auto h-16 w-16 text-blue-600 mb-4" />
+                      <p className="text-xl font-semibold text-slate-900 mb-2">
+                        Drop your file here or click to browse
+                      </p>
+                      <p className="text-sm text-slate-500">
+                        Supports all file types
+                      </p>
+                    </div>
+                    <input
+                      id="file-input"
+                      type="file"
+                      className="hidden"
+                      onChange={handleFileChange}
+                    />
                   </div>
-                  <input
-                    id="file-input"
-                    type="file"
-                    className="hidden"
-                    onChange={handleFileChange}
-                  />
-                </div>
-              )}
+                )}
 
-              {file && !result && (
-                <>
-                  {!uploading && (
-                    <div className="bg-gradient-to-br from-slate-50 to-blue-50 border-2 border-blue-200 rounded-xl p-8 space-y-6 shadow-lg">
-                      <div className="flex items-center gap-6">
-                        <div className="bg-blue-100 p-4 rounded-xl">
-                          <File className="h-16 w-16 text-blue-600" />
+                {file && !result && (
+                  <>
+                    {!uploading && (
+                      <div className="bg-gradient-to-br from-slate-50 to-blue-50 border-2 border-blue-200 rounded-xl p-6 space-y-4 shadow-lg">
+                        <div className="flex items-center gap-4">
+                          <div className="bg-blue-100 p-3 rounded-xl">
+                            <File className="h-12 w-12 text-blue-600" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-lg text-slate-900 truncate">{file.name}</p>
+                            <p className="text-sm text-slate-600">{formatFileSize(file.size)}</p>
+                          </div>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-xl text-slate-900 truncate mb-1">{file.name}</p>
-                          <p className="text-base text-slate-600">{formatFileSize(file.size)}</p>
+
+                        <div className="flex gap-3">
+                          <Button onClick={handleUpload} size="lg" className="flex-1 shadow-lg hover:scale-105 transition-transform">
+                            <Upload className="mr-2 h-4 w-4" />
+                            Upload
+                          </Button>
+                          <Button variant="outline" size="lg" onClick={reset} className="shadow-lg hover:scale-105 transition-transform">
+                            Cancel
+                          </Button>
                         </div>
                       </div>
+                    )}
 
-                      <div className="flex gap-4">
-                        <Button onClick={handleUpload} size="lg" className="flex-1 shadow-lg text-lg py-6 hover:scale-105 transition-transform">
-                          <Upload className="mr-2 h-5 w-5" />
-                          Upload to HDFS
+                    {uploading && (
+                      <div className="space-y-4 bg-gradient-to-br from-slate-50 to-blue-50 border-2 border-blue-200 rounded-xl p-6 shadow-lg">
+                        <div className="flex items-center gap-4 mb-4">
+                          <div className="bg-blue-100 p-3 rounded-xl">
+                            <File className="h-12 w-12 text-blue-600" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold text-lg text-slate-900 truncate">{file.name}</p>
+                            <p className="text-sm text-slate-600">{formatFileSize(file.size)}</p>
+                          </div>
+                        </div>
+
+                        <div className="space-y-3 bg-white/80 p-4 rounded-lg">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium text-slate-700">Progress</span>
+                            <span className="text-xl font-bold text-blue-600">{progress}%</span>
+                          </div>
+                          <Progress value={progress} className="h-2" />
+                          <p className="text-xs text-center text-slate-600">
+                            Uploading to distributed nodes...
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {result && (
+                  <div className="space-y-4">
+                    <Alert className="border-2 border-emerald-500 bg-gradient-to-br from-emerald-50 to-green-50 shadow-xl">
+                      <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                      <AlertTitle className="text-emerald-900 font-bold text-lg">Upload Successful!</AlertTitle>
+                      <AlertDescription className="text-emerald-800 space-y-3 mt-3">
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="bg-white/70 p-3 rounded-lg border border-emerald-200">
+                            <span className="text-xs font-semibold text-emerald-900 uppercase">Filename</span> 
+                            <p className="text-sm text-emerald-700 truncate font-medium mt-1">{result.filename}</p>
+                          </div>
+                          <div className="bg-white/70 p-3 rounded-lg border border-emerald-200">
+                            <span className="text-xs font-semibold text-emerald-900 uppercase">Size</span> 
+                            <p className="text-sm text-emerald-700 font-medium mt-1">{formatFileSize(result.file_size)}</p>
+                          </div>
+                          <div className="bg-white/70 p-3 rounded-lg border border-emerald-200">
+                            <span className="text-xs font-semibold text-emerald-900 uppercase">Chunks</span> 
+                            <p className="text-sm text-emerald-700 font-medium mt-1">{result.num_chunks}</p>
+                          </div>
+                          <div className="bg-white/70 p-3 rounded-lg border border-emerald-200">
+                            <span className="text-xs font-semibold text-emerald-900 uppercase">File ID</span> 
+                            <p className="text-xs text-emerald-700 truncate font-mono mt-1">{result.file_id.substring(0, 16)}...</p>
+                          </div>
+                        </div>
+                        <Button onClick={reset} size="lg" className="w-full mt-4 shadow-lg hover:scale-105 transition-transform" variant="outline">
+                          Upload Another File
                         </Button>
-                        <Button variant="outline" size="lg" onClick={reset} className="shadow-lg py-6 hover:scale-105 transition-transform">
-                          Cancel
-                        </Button>
-                      </div>
-                    </div>
-                  )}
+                      </AlertDescription>
+                    </Alert>
+                  </div>
+                )}
 
-                  {uploading && (
-                    <div className="space-y-4 bg-gradient-to-br from-slate-50 to-blue-50 border-2 border-blue-200 rounded-xl p-8 shadow-lg">
-                      <div className="flex items-center gap-6 mb-6">
-                        <div className="bg-blue-100 p-4 rounded-xl">
-                          <File className="h-16 w-16 text-blue-600" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-xl text-slate-900 truncate mb-1">{file.name}</p>
-                          <p className="text-base text-slate-600">{formatFileSize(file.size)}</p>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4 bg-white/80 p-6 rounded-lg">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-sm font-medium text-slate-700">Upload Progress</span>
-                          <span className="text-2xl font-bold text-blue-600">{progress}%</span>
-                        </div>
-                        <Progress value={progress} className="h-3" />
-                        <p className="text-sm text-center text-slate-600">
-                          Uploading to distributed nodes...
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-
-              {result && (
-                <div className="space-y-6">
-                  <Alert className="border-2 border-emerald-500 bg-gradient-to-br from-emerald-50 to-green-50 shadow-xl">
-                    <CheckCircle2 className="h-6 w-6 text-emerald-600" />
-                    <AlertTitle className="text-emerald-900 font-bold text-xl">Upload Successful!</AlertTitle>
-                    <AlertDescription className="text-emerald-800 space-y-4 mt-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="bg-white/70 p-4 rounded-lg border border-emerald-200 hover:shadow-md transition-shadow">
-                          <span className="text-xs font-semibold text-emerald-900 uppercase tracking-wide">Filename</span> 
-                          <p className="text-lg text-emerald-700 truncate font-medium mt-1">{result.filename}</p>
-                        </div>
-                        <div className="bg-white/70 p-4 rounded-lg border border-emerald-200 hover:shadow-md transition-shadow">
-                          <span className="text-xs font-semibold text-emerald-900 uppercase tracking-wide">Size</span> 
-                          <p className="text-lg text-emerald-700 font-medium mt-1">{formatFileSize(result.file_size)}</p>
-                        </div>
-                        <div className="bg-white/70 p-4 rounded-lg border border-emerald-200 hover:shadow-md transition-shadow">
-                          <span className="text-xs font-semibold text-emerald-900 uppercase tracking-wide">Chunks Created</span> 
-                          <p className="text-lg text-emerald-700 font-medium mt-1">{result.num_chunks}</p>
-                        </div>
-                        <div className="bg-white/70 p-4 rounded-lg border border-emerald-200 hover:shadow-md transition-shadow">
-                          <span className="text-xs font-semibold text-emerald-900 uppercase tracking-wide">File ID</span> 
-                          <p className="text-sm text-emerald-700 truncate font-mono mt-1">{result.file_id.substring(0, 24)}...</p>
-                        </div>
-                      </div>
-                      <Button onClick={reset} size="lg" className="w-full mt-6 shadow-lg text-lg py-6 hover:scale-105 transition-transform" variant="outline">
-                        Upload Another File
-                      </Button>
-                    </AlertDescription>
+                {error && (
+                  <Alert variant="destructive" className="shadow-xl border-2">
+                    <XCircle className="h-5 w-5" />
+                    <AlertTitle className="font-bold text-lg">Upload Failed</AlertTitle>
+                    <AlertDescription className="text-sm mt-2">{error}</AlertDescription>
                   </Alert>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Files List Card */}
+            <Card className="shadow-2xl bg-white/95 backdrop-blur-sm border-white/50">
+              <CardHeader className="border-b bg-gradient-to-r from-emerald-50 to-blue-50">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-2xl font-bold text-slate-900">Stored Files</CardTitle>
+                    <CardDescription className="text-slate-600">Browse and download files</CardDescription>
+                  </div>
+                  <Button 
+                    onClick={fetchFiles} 
+                    disabled={loadingFiles}
+                    size="sm"
+                    variant="outline"
+                    className="shadow-lg"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${loadingFiles ? 'animate-spin' : ''}`} />
+                  </Button>
                 </div>
-              )}
+              </CardHeader>
+              <CardContent className="p-6">
+                {filesError && (
+                  <Alert variant="destructive" className="mb-4">
+                    <XCircle className="h-4 w-4" />
+                    <AlertTitle className="text-sm">Error</AlertTitle>
+                    <AlertDescription className="text-xs">{filesError}</AlertDescription>
+                  </Alert>
+                )}
 
-              {error && (
-                <Alert variant="destructive" className="shadow-xl border-2">
-                  <XCircle className="h-6 w-6" />
-                  <AlertTitle className="font-bold text-xl">Upload Failed</AlertTitle>
-                  <AlertDescription className="text-base mt-2">{error}</AlertDescription>
-                </Alert>
-              )}
-            </CardContent>
-          </Card>
+                {loadingFiles && (
+                  <div className="text-center py-8">
+                    <RefreshCw className="h-10 w-10 mx-auto text-blue-600 animate-spin mb-3" />
+                    <p className="text-slate-600 text-sm">Loading files...</p>
+                  </div>
+                )}
 
-          {/* Files List Section */}
-          <Card className="max-w-4xl mx-auto mt-12 shadow-2xl bg-white/95 backdrop-blur-sm border-white/50">
-            <CardHeader className="border-b bg-gradient-to-r from-emerald-50 to-blue-50">
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-3xl font-bold text-slate-900">Stored Files</CardTitle>
-                  <CardDescription className="text-slate-600">Browse and download your distributed files</CardDescription>
-                </div>
-                <Button 
-                  onClick={fetchFiles} 
-                  disabled={loadingFiles}
-                  size="lg"
-                  variant="outline"
-                  className="shadow-lg"
-                >
-                  <RefreshCw className={`h-5 w-5 mr-2 ${loadingFiles ? 'animate-spin' : ''}`} />
-                  Refresh
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="p-8">
-              {filesError && (
-                <Alert variant="destructive" className="mb-6">
-                  <XCircle className="h-5 w-5" />
-                  <AlertTitle>Error</AlertTitle>
-                  <AlertDescription>{filesError}</AlertDescription>
-                </Alert>
-              )}
+                {!loadingFiles && files.length === 0 && (
+                  <div className="text-center py-8">
+                    <File className="h-12 w-12 mx-auto text-slate-400 mb-3" />
+                    <p className="text-base text-slate-600 font-medium">No files stored yet</p>
+                    <p className="text-xs text-slate-500 mt-1">Upload your first file to get started</p>
+                  </div>
+                )}
 
-              {loadingFiles && (
-                <div className="text-center py-12">
-                  <RefreshCw className="h-12 w-12 mx-auto text-blue-600 animate-spin mb-4" />
-                  <p className="text-slate-600">Loading files...</p>
-                </div>
-              )}
-
-              {!loadingFiles && files.length === 0 && (
-                <div className="text-center py-12">
-                  <File className="h-16 w-16 mx-auto text-slate-400 mb-4" />
-                  <p className="text-lg text-slate-600 font-medium">No files stored yet</p>
-                  <p className="text-sm text-slate-500 mt-2">Upload your first file to get started</p>
-                </div>
-              )}
-
-              {!loadingFiles && files.length > 0 && (
-                <div className="space-y-4">
-                  {files.map((file) => (
-                    <div
-                      key={file.file_hash}
-                      className="bg-gradient-to-br from-slate-50 to-blue-50 border-2 border-slate-200 rounded-xl p-6 hover:shadow-lg transition-all duration-300 hover:scale-[1.02]"
-                    >
-                      <div className="flex items-center gap-6">
-                        <div className="bg-blue-100 p-4 rounded-xl">
-                          <File className="h-12 w-12 text-blue-600" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h3 className="font-semibold text-xl text-slate-900 truncate mb-2">{file.file_name}</h3>
-                          <div className="flex flex-wrap gap-4 text-sm text-slate-600">
-                            <div>
-                              <span className="font-medium">Size:</span> {formatFileSize(file.file_size)}
+                {!loadingFiles && files.length > 0 && (
+                  <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2">
+                    {files.map((file) => (
+                      <div
+                        key={file.file_hash}
+                        className="bg-gradient-to-br from-slate-50 to-blue-50 border-2 border-slate-200 rounded-xl p-4 hover:shadow-lg transition-all duration-300 hover:scale-[1.02]"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="bg-blue-100 p-2 rounded-lg flex-shrink-0">
+                            <File className="h-8 w-8 text-blue-600" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-semibold text-base text-slate-900 truncate mb-1">{file.file_name}</h3>
+                            <div className="flex flex-wrap gap-2 text-xs text-slate-600 mb-2">
+                              <div>
+                                <span className="font-medium">Size:</span> {formatFileSize(file.file_size)}
+                              </div>
+                              <div>
+                                <span className="font-medium">Chunks:</span> {file.num_chunks}
+                              </div>
                             </div>
-                            <div>
-                              <span className="font-medium">Chunks:</span> {file.num_chunks}
-                            </div>
-                            <div>
-                              <span className="font-medium">Uploaded:</span> {new Date(file.upload_time).toLocaleString()}
+                            <div className="text-xs text-slate-500">
+                              {new Date(file.upload_time).toLocaleString()}
                             </div>
                           </div>
-                          <div className="mt-2">
-                            <span className="text-xs text-slate-500 font-mono">Hash: {file.file_hash.substring(0, 32)}...</span>
-                          </div>
+                          <Button
+                            onClick={() => handleDownload(file.file_name)}
+                            size="sm"
+                            className="shadow-lg hover:scale-105 transition-transform flex-shrink-0"
+                          >
+                            <Download className="h-4 w-4" />
+                          </Button>
                         </div>
-                        <Button
-                          onClick={() => handleDownload(file.file_hash, file.file_name)}
-                          size="lg"
-                          className="shadow-lg hover:scale-105 transition-transform"
-                        >
-                          <Download className="h-5 w-5 mr-2" />
-                          Download
-                        </Button>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </div>
 
         {/* Footer */}

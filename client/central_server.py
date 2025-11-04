@@ -115,7 +115,7 @@ def send_chunk_to_datanode(filename, chunk_data, datanodes, chunk_index, file_id
         }
 
         logger.info(f"Sending metadata for chunk {chunk_index} → {primary}")
-        sock.send(json.dumps(metadata).encode())
+        sock.sendall(json.dumps(metadata).encode())
 
         ack = sock.recv(4096)
         if not ack:
@@ -157,7 +157,7 @@ def request_rename(temp_id, file_hash, datanodes):
                 "new_id": file_hash
             }
             
-            sock.send(json.dumps(metadata).encode())
+            sock.sendall(json.dumps(metadata).encode())
             response = sock.recv(1024)
             sock.close()
             
@@ -197,17 +197,7 @@ def get_chunk_map(filename):
         return None
 
 
-def fetch_chunk_from_datanode(file_hash, chunk_hash, chunk_index, datanode_addr):
-    """
-    Fetch a single chunk from a datanode
-    Args:
-        file_hash: The hash of the file (used as file_id)
-        chunk_hash: The hash of the specific chunk
-        chunk_index: The index of the chunk
-        datanode_addr: "host:port" string
-    Returns:
-        bytes: The chunk data, or None if failed
-    """
+def fetch_chunk_from_datanode(file_hash, chunk_name, datanode_addr):
     try:
         host, port = datanode_addr.split(":")
         sock = socket(AF_INET, SOCK_STREAM)
@@ -217,13 +207,14 @@ def fetch_chunk_from_datanode(file_hash, chunk_hash, chunk_index, datanode_addr)
         # Send read request to datanode
         metadata = {
             "type": "read_chunk",
-            "file_id": file_hash,
-            "chunk_hash": chunk_hash,
-            "chunk_index": chunk_index
+            "file_hash": file_hash,
+            "chunk_name": chunk_name
         }
+
+        chunk_hash, chunk_index = chunk_name.split("_")
         
         logger.info(f"Requesting chunk {chunk_index} from {datanode_addr}")
-        sock.send(json.dumps(metadata).encode())
+        sock.sendall(json.dumps(metadata).encode())
         
         # Receive chunk data
         chunk_data = b""
@@ -412,7 +403,7 @@ async def list_files():
         sock.sendall((json.dumps(req) + "\n").encode())
         
         # Receive response
-        response_data = sock.recv(4096).decode()
+        response_data = read_till_newline(sock)
         sock.close()
         
         response = json.loads(response_data)
@@ -432,78 +423,43 @@ async def list_files():
 
 @app.get("/download/{filename}")
 async def download_file(filename: str):
-    """
-    Download a file by fetching all chunks from datanodes and reconstructing it
-    """
     try:
         logger.info(f"Download request received for: {filename}")
         
-        # Get chunk map from namenode
         chunk_map_response = get_chunk_map(filename)
+
+        """
+        chunk map looks something like this
+        {
+            “1hsh109h290hh01hasd_1”: “datanode1:5001”,
+            “k90h98u12hiasg98dh1_2”: “datanode2:5002”
+        }
+        """
+
+        chunk_map = chunk_map_response.get("chunk_map", {})
+        file_hash = chunk_map_response.get("file_hash")
         
         if not chunk_map_response or chunk_map_response.get("status") != "ok":
             error_msg = chunk_map_response.get("message", "File not found") if chunk_map_response else "Failed to get chunk map"
             raise HTTPException(status_code=404, detail=error_msg)
         
-        chunk_map = chunk_map_response.get("chunk_map", {})
-        file_hash = chunk_map_response.get("file_hash")
         
         if not chunk_map:
             raise HTTPException(status_code=404, detail="No chunks found for file")
         
         logger.info(f"Received chunk map with {len(chunk_map)} chunks")
-        
-        # Parse and sort chunks by index
-        # chunk_map format: {"chunk_hash_index": "host:port", ...}
-        chunk_list = []
-        for key, datanode_addr in chunk_map.items():
-            # Parse "chunk_hash_chunk_index" format
-            parts = key.rsplit("_", 1)
-            if len(parts) != 2:
-                logger.error(f"Invalid chunk key format: {key}")
-                continue
+
+        file_data = b""
+        for chunk_name in chunk_map.keys():
+            datanode_info = chunk_map[chunk_name]
+
+            chunk_data = fetch_chunk_from_datanode(file_hash, chunk_name, datanode_info)
             
-            chunk_hash = parts[0]
-            chunk_index = int(parts[1])
-            
-            chunk_list.append({
-                "index": chunk_index,
-                "hash": chunk_hash,
-                "datanode": datanode_addr
-            })
-        
-        # Sort by chunk index
-        chunk_list.sort(key=lambda x: x["index"])
-        
-        logger.info(f"Sorted {len(chunk_list)} chunks, fetching from datanodes...")
-        
-        # Fetch all chunks in order
-        file_data = io.BytesIO()
-        
-        for chunk_info in chunk_list:
-            chunk_data = fetch_chunk_from_datanode(
-                file_hash=file_hash,
-                chunk_hash=chunk_info["hash"],
-                chunk_index=chunk_info["index"],
-                datanode_addr=chunk_info["datanode"]
-            )
-            
-            if chunk_data is None:
-                raise HTTPException(
-                    status_code=500, 
-                    detail=f"Failed to fetch chunk {chunk_info['index']} from {chunk_info['datanode']}"
-                )
-            
-            file_data.write(chunk_data)
-        
-        # Reset stream position to beginning
-        file_data.seek(0)
-        
-        logger.info(f"Successfully reconstructed file {filename} ({file_data.getbuffer().nbytes} bytes)")
-        
+            file_data += chunk_data
+
         # Return file as streaming response
         return StreamingResponse(
-            file_data,
+            io.BytesIO(file_data),
             media_type="application/octet-stream",
             headers={
                 "Content-Disposition": f"attachment; filename={filename}"
