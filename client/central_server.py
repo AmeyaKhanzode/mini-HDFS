@@ -1,4 +1,6 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 import logging
 import math
 from fastapi.responses import JSONResponse
@@ -17,6 +19,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+app.mount("/static", StaticFiles(directory="client/static"), name="static")
 
 class UploadResponse(BaseModel):
     filename: str
@@ -303,6 +307,11 @@ async def upload_file(
 
 @app.get("/")
 async def root():
+    return FileResponse("client/static/index.html")
+
+
+@app.get("/api/status")
+async def status():
     return {
         "message": "Mini-HDFS Client API", 
         "status": "running",

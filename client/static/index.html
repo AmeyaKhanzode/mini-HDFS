@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mini-HDFS Upload</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .upload-area {
+            border: 3px dashed #667eea;
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            background: #f8f9ff;
+        }
+
+        .upload-area:hover {
+            border-color: #764ba2;
+            background: #f0f2ff;
+        }
+
+        .upload-area.dragover {
+            border-color: #764ba2;
+            background: #e8ebff;
+            transform: scale(1.02);
+        }
+
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        .upload-text {
+            color: #667eea;
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .upload-hint {
+            color: #999;
+            font-size: 13px;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .file-info {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9ff;
+            border-radius: 10px;
+            display: none;
+        }
+
+        .file-info.active {
+            display: block;
+        }
+
+        .file-name {
+            color: #333;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .file-size {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .upload-btn {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: all 0.3s ease;
+            display: none;
+        }
+
+        .upload-btn.active {
+            display: block;
+        }
+
+        .upload-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .upload-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .progress-container {
+            margin-top: 20px;
+            display: none;
+        }
+
+        .progress-container.active {
+            display: block;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .progress-text {
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .message {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            display: none;
+        }
+
+        .message.active {
+            display: block;
+        }
+
+        .message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .reset-btn {
+            margin-top: 15px;
+            padding: 10px 20px;
+            background: white;
+            color: #667eea;
+            border: 2px solid #667eea;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .reset-btn:hover {
+            background: #667eea;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📁 Mini-HDFS Upload</h1>
+        <p class="subtitle">Upload your files to the distributed file system</p>
+
+        <div class="upload-area" id="uploadArea">
+            <div class="upload-icon">☁️</div>
+            <div class="upload-text">Click to upload or drag and drop</div>
+            <div class="upload-hint">Any file type supported</div>
+            <input type="file" id="fileInput" />
+        </div>
+
+        <div class="file-info" id="fileInfo">
+            <div class="file-name" id="fileName"></div>
+            <div class="file-size" id="fileSize"></div>
+        </div>
+
+        <button class="upload-btn" id="uploadBtn">Upload to HDFS</button>
+
+        <div class="progress-container" id="progressContainer">
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+            <div class="progress-text" id="progressText">Uploading...</div>
+        </div>
+
+        <div class="message" id="message"></div>
+    </div>
+
+    <script>
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const fileInfo = document.getElementById('fileInfo');
+        const fileName = document.getElementById('fileName');
+        const fileSize = document.getElementById('fileSize');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+        const message = document.getElementById('message');
+
+        let selectedFile = null;
+
+        uploadArea.addEventListener('click', () => fileInput.click());
+
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFileSelect(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFileSelect(e.target.files[0]);
+            }
+        });
+
+        function handleFileSelect(file) {
+            selectedFile = file;
+            fileName.textContent = `📄 ${file.name}`;
+            fileSize.textContent = `Size: ${formatFileSize(file.size)}`;
+            fileInfo.classList.add('active');
+            uploadBtn.classList.add('active');
+            message.classList.remove('active');
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+
+        uploadBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+
+            uploadBtn.disabled = true;
+            progressContainer.classList.add('active');
+            message.classList.remove('active');
+
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+            formData.append('file_size', selectedFile.size);
+
+            try {
+                const xhr = new XMLHttpRequest();
+
+                xhr.upload.addEventListener('progress', (e) => {
+                    if (e.lengthComputable) {
+                        const percentComplete = (e.loaded / e.total) * 100;
+                        progressFill.style.width = percentComplete + '%';
+                        progressText.textContent = `Uploading... ${Math.round(percentComplete)}%`;
+                    }
+                });
+
+                xhr.addEventListener('load', () => {
+                    if (xhr.status === 200) {
+                        const response = JSON.parse(xhr.responseText);
+                        const shortId = response.file_id.substring(0, 16);
+                        const chunks = response.num_chunks;
+                        const size = formatFileSize(response.file_size);
+                        
+                        showMessage('success', 
+                            `✅ File Uploaded & Stored Successfully!\n\n` +
+                            `📄 Name: ${response.filename}\n` +
+                            `📦 Size: ${size}\n` +
+                            `🔢 Chunks: ${chunks}\n` +
+                            `🆔 File ID: ${shortId}...`
+                        );
+                        resetForm();
+                    } else {
+                        showMessage('error', `❌ Upload failed: ${xhr.statusText}`);
+                    }
+                    uploadBtn.disabled = false;
+                    progressContainer.classList.remove('active');
+                });
+
+                xhr.addEventListener('error', () => {
+                    showMessage('error', '❌ Network error occurred');
+                    uploadBtn.disabled = false;
+                    progressContainer.classList.remove('active');
+                });
+
+                xhr.open('POST', '/upload');
+                xhr.send(formData);
+
+            } catch (error) {
+                showMessage('error', `❌ Error: ${error.message}`);
+                uploadBtn.disabled = false;
+                progressContainer.classList.remove('active');
+            }
+        });
+
+        function showMessage(type, text) {
+            message.innerHTML = '';
+            
+            const textLines = text.split('\n');
+            textLines.forEach(line => {
+                const p = document.createElement('div');
+                p.textContent = line;
+                if (line.trim()) {
+                    message.appendChild(p);
+                }
+            });
+            
+            message.className = `message active ${type}`;
+            
+            if (type === 'success') {
+                const resetBtn = document.createElement('button');
+                resetBtn.className = 'reset-btn';
+                resetBtn.textContent = 'Upload Another File';
+                resetBtn.onclick = resetForm;
+                message.appendChild(document.createElement('br'));
+                message.appendChild(resetBtn);
+            }
+        }
+
+        function resetForm() {
+            selectedFile = null;
+            fileInput.value = '';
+            fileInfo.classList.remove('active');
+            uploadBtn.classList.remove('active');
+            progressFill.style.width = '0%';
+            progressText.textContent = 'Uploading...';
+            message.classList.remove('active');
+        }
+    </script>
+</body>
+</html>
