@@ -1,11 +1,12 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
-import { Upload, File, CheckCircle2, XCircle, HardDrive, Database, Zap, Shield, Download, RefreshCw } from 'lucide-react'
+import { Upload, File, CheckCircle2, XCircle, HardDrive, Database, Zap, Shield, Download, RefreshCw, BarChart3 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import Link from 'next/link'
 
 interface UploadResult {
   filename: string
@@ -189,9 +190,15 @@ export default function Home() {
             <h1 className="text-6xl font-bold text-white mb-4 tracking-tight">
               Distributed File System
             </h1>
-            <p className="text-xl text-blue-200 max-w-2xl mx-auto">
+            <p className="text-xl text-blue-200 max-w-2xl mx-auto mb-8">
               Store, replicate, and manage your files across a distributed network with automatic deduplication
             </p>
+            <Link href="/dashboard">
+              <Button size="lg" className="bg-white text-slate-900 hover:bg-blue-50 shadow-xl hover:scale-105 transition-all">
+                <BarChart3 className="mr-2 h-5 w-5" />
+                Go to Dashboard
+              </Button>
+            </Link>
           </div>
 
           {/* Feature Cards */}

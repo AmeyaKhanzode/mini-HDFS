@@ -82,3 +82,17 @@ def check_down_nodes():
 def get_alive_datanodes():
     with registry_lock:
         return [{"id": node_id, "host": node_info["host"], "port": node_info["port"]} for node_id, node_info in datanode_registry.items() if node_info["status"] == "alive"]
+
+def get_all_datanodes():
+    check_down_nodes()
+    with registry_lock:
+        nodes = []
+        for node_id, node_info in datanode_registry.items():
+            nodes.append({
+                "id": node_id,
+                "host": node_info["host"],
+                "port": node_info["port"],
+                "status": node_info["status"],
+                "last_heartbeat": node_info["last_beat"].isoformat() if node_info.get("last_beat") else None
+            })
+        return nodes

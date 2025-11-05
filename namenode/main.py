@@ -8,7 +8,7 @@ import logging
 import os
 from shared.commons import create_socket, read_till_newline
 from shared.config import BACKEND_HOST, BACKEND_PORT, NAMENODE_REQ_PORT, REPLICATION_FACTOR
-from heartbeat_handler import get_alive_datanodes
+from heartbeat_handler import get_alive_datanodes, get_all_datanodes
 from db_utils import store_file_metadata, get_file_metadata, get_chunk_locations, list_all_files
 from ping3 import ping
 
@@ -74,6 +74,11 @@ def handle_client(client_sock, addr):
                     # Get all files from database
                     files = list_all_files()
                     response = {"status": "ok", "files": files}
+                    client_sock.sendall((json.dumps(response) + "\n").encode())
+                elif subtype == "get_datanodes":
+                    # Get all datanodes status
+                    datanodes = get_all_datanodes()
+                    response = {"status": "ok", "datanodes": datanodes}
                     client_sock.sendall((json.dumps(response) + "\n").encode())
                 elif subtype == "read_file":
                     """

@@ -365,7 +365,7 @@ async def upload_file(
             await file.close()
 
 
-@app.get("/api/status")
+@app.get("/status")
 async def status():
     return {
         "message": "Mini-HDFS Client API", 
@@ -385,6 +385,29 @@ async def get_config():
         "datanodes": DATANODES,
         "chunk_size_mb": CHUNK_SIZE / (1024 * 1024)
     }
+
+@app.get("/datanodes")
+async def get_datanodes():
+    try:
+        sock = socket(AF_INET, SOCK_STREAM)
+        sock.settimeout(5.0)
+        sock.connect((NAMENODE_HOST, NAMENODE_REQ_PORT))
+        
+        req = {
+            "type": "read_req",
+            "subtype": "get_datanodes"
+        }
+        
+        sock.sendall((json.dumps(req) + "\n").encode())
+        response_data = read_till_newline(sock)
+        sock.close()
+        
+        response = json.loads(response_data)
+        return response
+        
+    except Exception as e:
+        logger.error(f"Error getting datanodes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/list_files")
 async def list_files():
