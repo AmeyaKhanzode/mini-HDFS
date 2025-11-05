@@ -95,10 +95,9 @@ def get_file_metadata(filename):
     if result:
         return {
             "file_hash": result[0],
-            "file_name": result[1],
-            "file_size": result[2],
-            "upload_time": result[3],
-            "num_chunks": result[4]
+            "file_size": result[1],
+            "upload_time": result[2],
+            "num_chunks": result[3]
         }
     return None
 

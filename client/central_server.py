@@ -188,6 +188,7 @@ def get_chunk_map(filename):
         sock.sendall((json.dumps(req) + "\n").encode())
 
         data = read_till_newline(sock)
+        logger.debug(f"data in get_chunk_map: {data}")
         json_data = json.loads(data)
         
         sock.close()
@@ -427,6 +428,7 @@ async def download_file(filename: str):
         logger.info(f"Download request received for: {filename}")
         
         chunk_map_response = get_chunk_map(filename)
+        logger.debug(f"{chunk_map_response}")
 
         """
         chunk map looks something like this

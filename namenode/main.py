@@ -119,8 +119,13 @@ def handle_client(client_sock, addr):
                             # find the first node thats actually up from the list
                             found_up_node = False
                             for node in datanodes:
-                                host = node.split(":")[0]
-                                port = node.split(":")[1]
+                                parts = node.split(":")
+                                if len(parts) != 2:
+                                    logger.error(f"Invalid datanode format: {node}")
+                                    continue
+                                    
+                                host = parts[0]
+                                port = parts[1]
 
                                 if ping(host):
                                     found_up_node = True
