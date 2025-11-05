@@ -14,3 +14,6 @@ export NAMENODE_HOST=192.168.0.101
 export DATANODE1_HOST=192.168.0.102
 export DATANODE2_HOST=192.168.0.103
 ```
+
+pending:
+- Automatic Re-replication (Rebuild Logic) - You track dead nodes but don't automatically re-replicate chunks from failed nodes to healthy ones. This is the only partial feature.
