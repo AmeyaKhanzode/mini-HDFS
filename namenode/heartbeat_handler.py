@@ -34,21 +34,24 @@ def handle_heartbeats():                    # this just gets the heartbeats. nee
                 try:
                     heartbeat_data = json.loads(data.decode())
                     if heartbeat_data.get("type") == "heartbeat" and heartbeat_data.get("status") == "alive":
-                        node_id = heartbeat_data.get("node_id")
+                        datanode_id = heartbeat_data.get("datanode_id")
+                        host = heartbeat_data.get("host")
+                        port = heartbeat_data.get("port")
+                        status = heartbeat_data.get("status", "alive")
                         
                         with registry_lock:
-                            if not datanode_registry.get(node_id):
-                                datanode_registry[node_id] = {
-                                    "host": heartbeat_data["datanode_host"],
-                                    "port": heartbeat_data["datanode_port"],
+                            if not datanode_registry.get(datanode_id):
+                                datanode_registry[datanode_id] = {
+                                    "host": host,
+                                    "port": port,
                                     "last_beat": datetime.now(),
                                     "status": "alive",
                                 }
                             else:
-                                datanode_registry[node_id]["last_beat"] = datetime.now()
-                                datanode_registry[node_id]["status"] = "alive"
+                                datanode_registry[datanode_id]["last_beat"] = datetime.now()
+                                datanode_registry[datanode_id]["status"] = "alive"
                         
-                        logger.info(f"Heartbeat received from {node_id}. Status: Alive")
+                        logger.info(f"Heartbeat received from {datanode_id}. Status: Alive")
                 except Exception as e:
                     logger.error(f"Could not parse JSON data. Error: {e}")
             client_sock.close()

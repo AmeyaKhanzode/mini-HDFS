@@ -26,10 +26,9 @@ def send_heartbeat():
                 heartbeat = {
                     "type": "heartbeat",
                     "status": "alive",
-                    "node_id": datanode_id,
-                    "datanode_host": DATANODE_HOST,
-                    "datanode_port": DATANODE_PORT,
-                    "status_code": 1
+                    "datanode_id": datanode_id,
+                    "host": DATANODE_HOST,
+                    "port": DATANODE_PORT
                 }
                 sock.send(json.dumps(heartbeat).encode())
                 sock.close()
