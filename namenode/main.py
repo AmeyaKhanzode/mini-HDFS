@@ -208,6 +208,3 @@ def req_listener():
     except Exception as e:
         logger.error(f"FATAL: Request listener failed: {e}", exc_info=True)
         raise
-
-
-            
