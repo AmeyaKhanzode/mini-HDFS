@@ -4,7 +4,7 @@ import os
 import logging
 import time
 from socket import *
-from shared.config import HEARTBEAT_INTERVAL, CONNECTION_RETRY_DELAY, NAMENODE_HOST, NAMENODE_PORT, DATANODE_HOST, DATANODE_PORT
+from shared.config import HEARTBEAT_INTERVAL, CONNECTION_RETRY_DELAY, NAMENODE_HOST, NAMENODE_PORT, DATANODE_HOST, DATANODE_PORT, DATANODE_ID
 
 logging.basicConfig(
     level=logging.INFO,
@@ -13,7 +13,7 @@ logging.basicConfig(
 
 def send_heartbeat():
     logger = logging.getLogger(__name__)
-    datanode_id = os.getenv("DATANODE_ID")
+    datanode_id = DATANODE_ID
     
     while True:
         max_retries = 5

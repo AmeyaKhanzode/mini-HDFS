@@ -86,6 +86,14 @@ def get_alive_datanodes():
     with registry_lock:
         return [{"id": node_id, "host": node_info["host"], "port": node_info["port"]} for node_id, node_info in datanode_registry.items() if node_info["status"] == "alive"]
 
+def is_datanode_alive(host, port):
+    # uses heartbeats instead of icmp ping, which isnt reliable inside k8s
+    with registry_lock:
+        return any(
+            node_info["host"] == host and str(node_info["port"]) == str(port) and node_info["status"] == "alive"
+            for node_info in datanode_registry.values()
+        )
+
 def get_all_datanodes():
     check_down_nodes()
     with registry_lock:

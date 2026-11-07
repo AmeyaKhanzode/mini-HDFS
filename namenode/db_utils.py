@@ -1,6 +1,10 @@
+import os
 import sqlite3 as db
 
-DATABASE_NAME = "dfs.db"
+# point this at a mounted volume (eg. /metadata/dfs.db) so metadata survives restarts
+DATABASE_NAME = os.getenv("DFS_DB_PATH", "dfs.db")
+if os.path.dirname(DATABASE_NAME):
+    os.makedirs(os.path.dirname(DATABASE_NAME), exist_ok=True)
 
 def get_connection():
     conn = db.connect(DATABASE_NAME, check_same_thread=False)

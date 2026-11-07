@@ -8,9 +8,8 @@ import logging
 import os
 from shared.commons import create_socket, read_till_newline
 from shared.config import BACKEND_HOST, BACKEND_PORT, NAMENODE_REQ_PORT, REPLICATION_FACTOR
-from heartbeat_handler import get_alive_datanodes, get_all_datanodes
+from heartbeat_handler import get_alive_datanodes, get_all_datanodes, is_datanode_alive
 from db_utils import store_file_metadata, get_file_metadata, get_chunk_locations, list_all_files
-from ping3 import ping
 
 logging.basicConfig(
     level=logging.INFO,
@@ -132,7 +131,7 @@ def handle_client(client_sock, addr):
                                 host = parts[0]
                                 port = parts[1]
 
-                                if ping(host):
+                                if is_datanode_alive(host, port):
                                     found_up_node = True
                                     chunk_host_map[f"{chunk_hash}_{chunk_index}"] = f"{host}:{port}"
                                     break

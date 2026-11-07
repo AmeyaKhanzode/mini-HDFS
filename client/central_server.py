@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 import json
 from socket import *
 from pydantic import BaseModel
-from shared.config import NAMENODE_HOST, NAMENODE_REQ_PORT, DATANODES, CHUNK_SIZE
+from shared.config import NAMENODE_HOST, NAMENODE_REQ_PORT, CHUNK_SIZE
 from shared.commons import *
 import hashlib
 from typing import List, Dict
@@ -382,7 +382,7 @@ async def get_config():
             "host": NAMENODE_HOST,
             "port": NAMENODE_REQ_PORT
         },
-        "datanodes": DATANODES,
+        "datanodes": (await get_datanodes()).get("datanodes", []),
         "chunk_size_mb": CHUNK_SIZE / (1024 * 1024)
     }
 
