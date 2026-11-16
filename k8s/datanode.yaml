@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: datanode
+spec:
+  serviceName: datanode
+  replicas: 2
+  selector:
+    matchLabels:
+      app: datanode
+  template:
+    metadata:
+      labels:
+        app: datanode
+    spec:
+      enableServiceLinks: false 
+      containers:
+        - name: datanode
+          image: mini-hdfs/datanode:v1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: data
+              containerPort: 5001
+          env:
+            - name: NAMENODE_HOST
+              value: "namenode"    # the namenode Service's name
+            - name: NAMENODE_PORT
+              value: "5000"        # env values must be strings, hence the quotes
+            - name: DATANODE_PORT
+              value: "5001"
+          volumeMounts:
+            - name: data
+              mountPath: /data 
+  volumeClaimTemplates:
+    - metadata:
+        name: data                      # must match volumeMounts.name
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: datanode
+spec:
+  clusterIP: None
+  selector:
+    app: datanode
+  ports:
+    - name: requests
+      port: 5001
+      targetPort: 5001

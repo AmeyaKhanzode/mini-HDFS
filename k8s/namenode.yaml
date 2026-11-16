@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: namenode
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate                # kill old pod before starting new one, so two namenodes never share the db
+  selector:
+    matchLabels:
+      app: namenode
+  template:
+    metadata:
+      labels:
+        app: namenode
+    spec:
+      enableServiceLinks: false 
+      containers:
+        - name: namenode
+          image: mini-hdfs/namenode:v1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: heartbeat
+              containerPort: 5000
+            - name: requests
+              containerPort: 5050
+          env:
+            - name: DFS_DB_PATH
+              value: "/metadata/dfs.db"   # db lives on the mounted volume
+          volumeMounts:
+            - name: metadata
+              mountPath: /metadata
+      volumes:                            # pod-level: same indentation as containers
+        - name: metadata
+          persistentVolumeClaim:
+            claimName: namenode-metadata
+
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: namenode-metadata
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: namenode
+spec:
+  selector:
+    app: namenode
+  ports:
+    - name: heartbeat
+      port: 5000
+      targetPort: 5000
+    - name: requests
+      port: 5050
+      targetPort: 5050
